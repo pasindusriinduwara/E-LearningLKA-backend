@@ -21,7 +21,6 @@ public class ApplicationConfig {
         this.repository = repository;
     }
 
-    // Database එකෙන් user ව හොයලා දෙන Service එක
     @Bean
     public UserDetailsService userDetailsService() {
         return username -> repository.findByEmail(username)
@@ -30,8 +29,6 @@ public class ApplicationConfig {
 
     @Bean
     public AuthenticationProvider authenticationProvider() {
-        // අලුත් version එකේදී userDetailsService එක මෙහෙම constructor එකටම pass කරන්න
-        // ඕනේ
         DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider(userDetailsService());
 
         authProvider.setPasswordEncoder(passwordEncoder());

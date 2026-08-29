@@ -43,7 +43,6 @@ public class User extends BaseEntity implements UserDetails {
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
-        // UserType එකෙන් Role එක හදනවා (උදා: ROLE_STUDENT)
         return List.of(new SimpleGrantedAuthority("ROLE_" + this.userType));
     }
 
@@ -54,7 +53,6 @@ public class User extends BaseEntity implements UserDetails {
 
     @Override
     public String getUsername() {
-        // Username එක විදියට අපි email එක පාවිච්චි කරනවා
         return this.email;
     }
 
@@ -75,7 +73,6 @@ public class User extends BaseEntity implements UserDetails {
 
     @Override
     public boolean isEnabled() {
-        // Status එක "ACTIVE" නම් විතරක් account එක enable කරනවා
         return "ACTIVE".equalsIgnoreCase(this.status);
     }
 }

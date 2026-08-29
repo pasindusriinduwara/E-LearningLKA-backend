@@ -37,15 +37,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         final String jwt;
         final String userEmail;
 
-        // Header එක නැත්නම්, හෝ "Bearer " කියන වචනෙන් පටන් ගන්නේ නැත්නම්, මේකෙ token
-        // එකක් නෑ.
-        // ඒ නිසා token check කරන්නේ නැතුව ඊළඟට යවනවා (public API එකක් වෙන්න පුළුවන්)
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        // "Bearer " කියන අකුරු 7 අයින් කරලා token එක විතරක් ගන්නවා
         jwt = authHeader.substring(7);
         // Token එකෙන් email (username) එක extract කරනවා
         try {
@@ -55,10 +51,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
-        // Email එකක් තියෙනවා නම් සහ දැනටමත් authenticate වෙලා නැත්නම්
         if (userEmail != null && SecurityContextHolder.getContext().getAuthentication() == null) {
 
-            // Database එකෙන් User details ගන්නවා
             UserDetails userDetails;
             try {
                 userDetails = this.userDetailsService.loadUserByUsername(userEmail);
@@ -67,10 +61,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 return;
             }
 
-            // Token එක valid ද කියලා check කරනවා (expire වෙලාද, user ගේමද කියලා)
             if (jwtService.isTokenValid(jwt, userDetails)) {
 
-                // Valid නම් Spring Security වලට user ව login කරවනවා (Context එක update කරනවා)
                 UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
                         userDetails,
                         null,
@@ -81,7 +73,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             }
         }
 
-        // Filter chain එකේ ඊළඟ පියවරට යවනවා
         filterChain.doFilter(request, response);
     }
 }

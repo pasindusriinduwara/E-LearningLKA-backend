@@ -17,9 +17,7 @@ import java.util.function.Function;
 @Service
 public class JwtService {
 
-    // මේක ගොඩක් secure, දිග secret key එකක්.
-    // (Production යද්දි මේක application.properties එකට දාලා ගන්න එක තමයි හොඳම
-    // ක්‍රමය, දැනට මෙහෙම පාවිච්චි කරමු)
+    
     private static final String SECRET_KEY = "404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970";
 
     public String extractUsername(String token) {
@@ -35,7 +33,6 @@ public class JwtService {
         return generateToken(new HashMap<>(), userDetails);
     }
 
-    // Token එක හදන ප්‍රධාන Method එක
     public String generateToken(Map<String, Object> extraClaims, UserDetails userDetails) {
         return Jwts.builder()
                 .setClaims(extraClaims)
@@ -68,7 +65,6 @@ public class JwtService {
                 .getBody();
     }
 
-    // Secret Key එක encrypt කරන Method එක
     private Key getSignInKey() {
         byte[] keyBytes = Decoders.BASE64.decode(SECRET_KEY);
         return Keys.hmacShaKeyFor(keyBytes);

@@ -16,14 +16,12 @@ public class AuthController {
         this.service = service;
     }
 
-    // අලුත් Signup Endpoint එක
     @PostMapping("/register")
     public ResponseEntity<AuthenticationResponse> register(
             @RequestBody RegisterRequest request) {
         return ResponseEntity.ok(service.register(request));
     }
 
-    // පරණ Login Endpoint එක
     @PostMapping("/login")
     public ResponseEntity<AuthenticationResponse> authenticate(
             @RequestBody AuthenticationRequest request) {

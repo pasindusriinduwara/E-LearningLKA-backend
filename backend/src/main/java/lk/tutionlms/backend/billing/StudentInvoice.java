@@ -18,12 +18,12 @@ public class StudentInvoice extends BaseEntity {
     @Column(name = "invoice_number")
     private String invoiceNumber;
 
-    private String month; // "August 2026"
+    private String month; 
 
     @Column(name = "batch_name")
-    private String batch; // "A/L Combined Mathematics"
+    private String batch; 
 
-    private String amount; // "LKR 3,500"
+    private String amount; 
 
-    private String status; // "Due 30 Aug" or "Paid 02 Aug"
+    private String status; 
 }

@@ -10,6 +10,5 @@ import java.util.UUID;
 public interface StudentRepository extends JpaRepository<Student, UUID> {
     Optional<Student> findByStudentId(String studentId);
 
-    // මේක අලුතින් එකතු කරන්න (User ගේ ID එකෙන් Student ව හොයාගන්න)
     Optional<Student> findByUserId(UUID userId);
 }

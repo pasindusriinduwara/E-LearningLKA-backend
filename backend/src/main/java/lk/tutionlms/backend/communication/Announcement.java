@@ -5,6 +5,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
 import lk.tutionlms.backend.common.BaseEntity;
 import lombok.*;
+import java.util.UUID;
 
 @Entity
 @Table(name = "announcements")
@@ -14,6 +15,9 @@ import lombok.*;
 @AllArgsConstructor
 @Builder
 public class Announcement extends BaseEntity {
+
+    @Column(name = "batch_id")
+    private UUID batchId;
 
     @Column(nullable = false)
     private String title;

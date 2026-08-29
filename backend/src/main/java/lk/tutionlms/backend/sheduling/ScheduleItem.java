@@ -9,6 +9,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import java.util.UUID;
 
 /**
  * ScheduleItem maps to the 'class_schedules' table in PostgreSQL.
@@ -22,6 +23,9 @@ import lombok.Setter;
 @AllArgsConstructor
 @Builder
 public class ScheduleItem extends BaseEntity {
+
+    @Column(name = "batch_id", nullable = false)
+    private UUID batchId;
 
     // Day label displayed on UI (e.g., "Today", "Tomorrow", "Wed")
     @Column(name = "day_of_week")

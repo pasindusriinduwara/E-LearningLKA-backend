@@ -1,6 +1,9 @@
 package lk.tutionlms.backend.content;
 
 import lombok.RequiredArgsConstructor;
+import lk.tutionlms.backend.identity.User;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -16,7 +19,8 @@ public class MaterialController {
     private final MaterialRepository materialRepository;
 
     @GetMapping("/recent")
-    public ResponseEntity<List<LearningMaterial>> getRecentMaterials() {
-        return ResponseEntity.ok(materialRepository.findByDeletedFalse());
+    @PreAuthorize("hasRole('STUDENT')")
+    public ResponseEntity<List<LearningMaterial>> getRecentMaterials(@AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(materialRepository.findByStudentUserId(user.getId()));
     }
 }

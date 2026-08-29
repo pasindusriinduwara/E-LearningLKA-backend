@@ -42,23 +42,47 @@ public class SecurityConfig {
                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authenticationProvider(authenticationProvider)
             .authorizeHttpRequests(auth -> auth
-                // Login and registration
-                .requestMatchers("/auth/**").permitAll()
-                .requestMatchers("/api/v1/auth/**").permitAll()
+    .requestMatchers("/auth/**").permitAll()
+    .requestMatchers("/api/v1/auth/**").permitAll()
 
-                // Allow browser CORS preflight requests
-                .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+    .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
-                // CHANGED: Use hasAuthority instead of hasRole to avoid the "ROLE_" prefix mismatch
-                .requestMatchers("/api/v1/teacher/**").hasRole("TEACHER")
-                .requestMatchers("/api/v1/batches/**").hasRole("TEACHER")
-                .requestMatchers(HttpMethod.GET, "/api/v1/subjects").authenticated()
-                .requestMatchers(HttpMethod.POST, "/api/v1/subjects").hasRole("TEACHER")
-                .requestMatchers("/api/v1/students/**").hasRole("STUDENT")
+    .requestMatchers(HttpMethod.GET, "/api/v1/batches").authenticated()
+    .requestMatchers(HttpMethod.POST, "/api/v1/batches").hasRole("TEACHER")
 
-                // All other endpoints require login
-                .anyRequest().authenticated()
-            )
+    .requestMatchers("/api/v1/teacher/**").hasRole("TEACHER")
+
+    .requestMatchers(HttpMethod.GET, "/api/v1/subjects").authenticated()
+    .requestMatchers(HttpMethod.POST, "/api/v1/subjects").hasRole("TEACHER")
+
+    .requestMatchers("/api/v1/students/**").hasRole("STUDENT")
+
+    .requestMatchers(HttpMethod.POST, "/api/v1/enrollments/request")
+        .hasRole("STUDENT")
+
+    .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/my-status")
+        .hasRole("STUDENT")
+
+    .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/pending")
+        .hasRole("TEACHER")
+
+    .requestMatchers(HttpMethod.PUT, "/api/v1/enrollments/*/approve")
+        .hasRole("TEACHER")
+
+    .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/teacher/batches/**").hasRole("TEACHER")
+
+    .requestMatchers(HttpMethod.POST,"/api/v1/enrollments/request").hasRole("STUDENT")
+
+    .requestMatchers( HttpMethod.GET,"/api/v1/enrollments/my-status").hasRole("STUDENT")
+
+    .requestMatchers(HttpMethod.GET,"/api/v1/enrollments/teacher/batches/**").hasRole("TEACHER")
+
+    .requestMatchers(HttpMethod.GET,"/api/v1/enrollments/pending").hasRole("TEACHER")
+
+    .requestMatchers(HttpMethod.PUT,"/api/v1/enrollments/*/approve").hasRole("TEACHER")
+
+    .anyRequest().authenticated()
+)
             .addFilterBefore(
                 jwtAuthenticationFilter,
                 UsernamePasswordAuthenticationFilter.class

@@ -5,6 +5,12 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
 import lk.tutionlms.backend.common.BaseEntity;
 import lombok.*;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
+
+import java.util.Collection;
+import java.util.List;
 
 @Entity
 @Table(name = "users")
@@ -13,7 +19,7 @@ import lombok.*;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class User extends BaseEntity {
+public class User extends BaseEntity implements UserDetails {
 
     @Column(nullable = false, unique = true, length = 150)
     private String email;
@@ -30,4 +36,46 @@ public class User extends BaseEntity {
     @Column(length = 20)
     @Builder.Default
     private String status = "ACTIVE";
+
+    // ==========================================
+    // Spring Security UserDetails Methods
+    // ==========================================
+
+    @Override
+    public Collection<? extends GrantedAuthority> getAuthorities() {
+        // UserType එකෙන් Role එක හදනවා (උදා: ROLE_STUDENT)
+        return List.of(new SimpleGrantedAuthority("ROLE_" + this.userType));
+    }
+
+    @Override
+    public String getPassword() {
+        return this.password;
+    }
+
+    @Override
+    public String getUsername() {
+        // Username එක විදියට අපි email එක පාවිච්චි කරනවා
+        return this.email;
+    }
+
+    @Override
+    public boolean isAccountNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isAccountNonLocked() {
+        return true;
+    }
+
+    @Override
+    public boolean isCredentialsNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isEnabled() {
+        // Status එක "ACTIVE" නම් විතරක් account එක enable කරනවා
+        return "ACTIVE".equalsIgnoreCase(this.status);
+    }
 }

@@ -6,6 +6,9 @@ import jakarta.persistence.Table;
 import lk.tutionlms.backend.common.BaseEntity;
 import lombok.*;
 
+import java.time.LocalDate;
+import java.util.UUID;
+
 @Entity
 @Table(name = "students")
 @Getter
@@ -14,6 +17,9 @@ import lombok.*;
 @AllArgsConstructor
 @Builder
 public class Student extends BaseEntity {
+
+    @Column(name = "user_id", unique = true)
+    private UUID userId;
 
     @Column(nullable = false)
     private String name;
@@ -28,4 +34,7 @@ public class Student extends BaseEntity {
     private String stream;
 
     private String medium;
+
+    @Column(name = "date_of_birth")
+    private LocalDate dateOfBirth;
 }

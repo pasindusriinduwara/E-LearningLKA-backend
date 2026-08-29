@@ -5,6 +5,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 
 @RestController
 @RequestMapping("/api/v1/students")
@@ -15,8 +16,8 @@ public class StudentController {
 
     // GET http://localhost:8080/api/v1/students/profile?studentId=24081
     @GetMapping("/profile")
-    public ResponseEntity<Student> getProfile(@RequestParam(defaultValue = "24081") String studentId) {
-        return studentRepository.findByStudentId(studentId)
+    public ResponseEntity<Student> getProfile(@AuthenticationPrincipal User user) {
+        return studentRepository.findByUserId(user.getId())
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }

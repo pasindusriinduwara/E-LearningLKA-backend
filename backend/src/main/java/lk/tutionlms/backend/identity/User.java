@@ -31,15 +31,11 @@ public class User extends BaseEntity implements UserDetails {
     private String phoneNumber;
 
     @Column(name = "user_type", nullable = false, length = 30)
-    private String userType; // "STUDENT", "TEACHER", "ADMIN"
+    private String userType; 
 
     @Column(length = 20)
     @Builder.Default
     private String status = "ACTIVE";
-
-    // ==========================================
-    // Spring Security UserDetails Methods
-    // ==========================================
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {

@@ -25,8 +25,8 @@ public class Announcement extends BaseEntity {
     private String description;
 
     @Column(name = "announcement_type")
-    private String type; // "IMPORTANT", "INFO"
+    private String type; 
 
     @Column(name = "time_text")
-    private String time; // "1 hour ago"
+    private String time; 
 }

@@ -113,14 +113,14 @@ public class MaterialUploadService {
                     material.getId(), material.getBatchId(), material.getTitle(),
                     material.getType(), material.getFileUrl());
         } catch (RuntimeException ex) {
-            // PostgreSQL save එක fail වුණොත් Cloudinary එකේ orphan asset එකක් ඉතිරි නොකරන්න.
+            
             try {
                 Object resourceType = result.get("resource_type");
                 cloudinary.uploader().destroy(publicId, ObjectUtils.asMap(
                         "resource_type", resourceType instanceof String ? resourceType : "auto",
                         "invalidate", true));
             } catch (Exception ignored) {
-                // Original database error එක preserve කරනවා.
+                
             }
             throw ex;
         }

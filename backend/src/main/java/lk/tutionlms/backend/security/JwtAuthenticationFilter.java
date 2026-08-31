@@ -32,7 +32,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             @NonNull HttpServletResponse response,
             @NonNull FilterChain filterChain) throws ServletException, IOException {
 
-        // HTTP Request එකේ "Authorization" header එක ගන්නවා
         final String authHeader = request.getHeader("Authorization");
         final String jwt;
         final String userEmail;
@@ -43,7 +42,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         jwt = authHeader.substring(7);
-        // Token එකෙන් email (username) එක extract කරනවා
         try {
             userEmail = jwtService.extractUsername(jwt);
         } catch (RuntimeException ex) {

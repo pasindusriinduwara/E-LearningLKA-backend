@@ -12,20 +12,11 @@ import org.springframework.stereotype.Repository;
 public interface EnrollmentRepository
         extends JpaRepository<Enrollment, UUID> {
 
-    /*
-     * Check whether the student is already enrolled in the batch.
-     * Spring Data JPA creates this SQL query automatically
-     * using the field names in Enrollment entity.
-     */
     boolean existsByStudentIdAndBatchId(
             UUID studentId,
             UUID batchId
     );
 
-    /*
-     * Get active enrolled students for batches
-     * owned by a particular teacher.
-     */
     @Query(value = """
         SELECT
             s.id AS id,

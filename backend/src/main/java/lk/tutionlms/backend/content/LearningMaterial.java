@@ -22,16 +22,16 @@ public class LearningMaterial extends BaseEntity {
     @Column(nullable = false)
     private String title;
 
-    private String subject; // e.g. "Combined Mathematics", "Chemistry", "Physics"
+    private String subject; 
 
     @Column(name = "resource_type", nullable = false, length = 50)
-    private String type; // "PDF" or "Video"
+    private String type; 
 
     @Column(name = "time_text")
-    private String time; // "Added 2 hours ago"
+    private String time; 
 
     @Column(name = "size_text")
-    private String size; // "2.4 MB" or "48 min"
+    private String size; 
 
     @Column(name = "file_url", length = 1000)
     private String fileUrl;

@@ -1,4 +1,4 @@
-// src/main/java/lk/tutionlms/backend/batch/CreateBatchDto.java
+
 package lk.tutionlms.backend.batch;
 
 import lombok.Data;
@@ -10,6 +10,6 @@ public class CreateBatchDto {
     private String name;
     private String examYear;
     private BigDecimal monthlyFee;
-    private String deliveryMode; // ONLINE, IN_PERSON, HYBRID
+    private String deliveryMode; 
     private UUID subjectId; 
 }

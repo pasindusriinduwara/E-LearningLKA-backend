@@ -12,6 +12,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
 import java.time.LocalDate;
 import java.util.UUID;
 
@@ -23,7 +24,7 @@ public class AuthenticationService {
     private final AuthenticationManager authenticationManager;
     private final StudentRepository studentRepository;
     private final TeacherRepository teacherRepository;
-    private final PasswordEncoder passwordEncoder; // අලුතෙන් add කරපු එක
+    private final PasswordEncoder passwordEncoder;
 
     public AuthenticationService(UserRepository repository, JwtService jwtService,
             AuthenticationManager authenticationManager, PasswordEncoder passwordEncoder,
@@ -38,40 +39,49 @@ public class AuthenticationService {
 
     @Transactional
     public AuthenticationResponse register(RegisterRequest request) {
-        // 1. Email එක දැනටමත් තියෙනවද කියලා check කරනවා
         if (repository.existsByEmail(request.getEmail())) {
             throw new RuntimeException("Email already in use");
         }
 
         var user = User.builder()
                 .email(request.getEmail())
-                .password(passwordEncoder.encode(request.getPassword())) // Password Hashing
+                .password(passwordEncoder.encode(request.getPassword()))
                 .phoneNumber(request.getPhoneNumber())
                 .userType(request.getUserType())
                 .status("ACTIVE")
                 .build();
 
         repository.save(user);
+        String fullName = "";
+
         if ("STUDENT".equalsIgnoreCase(request.getUserType())) {
             String first = request.getFirstName() == null ? "" : request.getFirstName().trim();
             String last = request.getLastName() == null ? "" : request.getLastName().trim();
+            fullName = (first + " " + last).trim();
             String initials = (first + last).replaceAll("\\s+", "").toUpperCase();
-            if (initials.length() > 2) initials = initials.substring(0, 2);
-            LocalDate dob = request.getDob() == null || request.getDob().isBlank() ? null : LocalDate.parse(request.getDob());
-            studentRepository.save(Student.builder().userId(user.getId()).name((first + " " + last).trim())
+            if (initials.length() > 2)
+                initials = initials.substring(0, 2);
+            LocalDate dob = request.getDob() == null || request.getDob().isBlank() ? null
+                    : LocalDate.parse(request.getDob());
+            studentRepository.save(Student.builder().userId(user.getId()).name(fullName)
                     .initials(initials).studentId("ST-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase())
-                    .exam(request.getGrade()).stream(request.getStream()).medium(request.getMedium()).dateOfBirth(dob).build());
+                    .exam(request.getGrade()).stream(request.getStream()).medium(request.getMedium()).dateOfBirth(dob)
+                    .build());
         } else if ("TEACHER".equalsIgnoreCase(request.getUserType())) {
             String first = request.getFirstName() == null ? "" : request.getFirstName().trim();
             String last = request.getLastName() == null ? "" : request.getLastName().trim();
+            fullName = (first + " " + last).trim();
             teacherRepository.save(Teacher.builder().userId(user.getId())
-                    .name((first + " " + last).trim())
+                    .name(fullName)
                     .qualification(request.getQualification()).bio(request.getExperience()).build());
         }
 
         var jwtToken = jwtService.generateToken(user);
         return AuthenticationResponse.builder()
                 .token(jwtToken)
+                .role(user.getUserType())
+                .email(user.getEmail())
+                .name(fullName)
                 .build();
     }
 
@@ -80,6 +90,19 @@ public class AuthenticationService {
                 new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword()));
         var user = repository.findByEmail(request.getEmail()).orElseThrow();
         var jwtToken = jwtService.generateToken(user);
-        return AuthenticationResponse.builder().token(jwtToken).build();
+
+        String fullName = "";
+        if ("STUDENT".equalsIgnoreCase(user.getUserType())) {
+            fullName = studentRepository.findByUserId(user.getId()).map(Student::getName).orElse("");
+        } else if ("TEACHER".equalsIgnoreCase(user.getUserType())) {
+            fullName = teacherRepository.findByUserId(user.getId()).map(Teacher::getName).orElse("");
+        }
+
+        return AuthenticationResponse.builder()
+                .token(jwtToken)
+                .role(user.getUserType())
+                .email(user.getEmail())
+                .name(fullName)
+                .build();
     }
 }

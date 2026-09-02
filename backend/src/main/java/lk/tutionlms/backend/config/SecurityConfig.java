@@ -36,57 +36,56 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
 
         http
-            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
-            .csrf(csrf -> csrf.disable())
-            .sessionManagement(session -> session
-                .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            .authenticationProvider(authenticationProvider)
-            .authorizeHttpRequests(auth -> auth
-    .requestMatchers("/auth/**").permitAll()
-    .requestMatchers("/api/v1/auth/**").permitAll()
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(session -> session
+                        .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authenticationProvider(authenticationProvider)
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers("/error").permitAll()
+                        .requestMatchers("/auth/**").permitAll()
+                        .requestMatchers("/api/v1/auth/**").permitAll()
 
-    .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
-    .requestMatchers(HttpMethod.GET, "/api/v1/batches").authenticated()
-    .requestMatchers(HttpMethod.POST, "/api/v1/batches").hasRole("TEACHER")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/batches").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/batches").hasRole("TEACHER")
 
-    .requestMatchers("/api/v1/teacher/**").hasRole("TEACHER")
+                        .requestMatchers("/api/v1/teacher/**").hasRole("TEACHER")
 
-    .requestMatchers(HttpMethod.GET, "/api/v1/subjects").authenticated()
-    .requestMatchers(HttpMethod.POST, "/api/v1/subjects").hasRole("TEACHER")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/subjects").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/subjects").hasRole("TEACHER")
 
-    .requestMatchers("/api/v1/students/**").hasRole("STUDENT")
+                        .requestMatchers("/api/v1/students/**").hasRole("STUDENT")
 
-    .requestMatchers(HttpMethod.POST, "/api/v1/enrollments/request")
-        .hasRole("STUDENT")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/enrollments/request")
+                        .hasRole("STUDENT")
 
-    .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/my-status")
-        .hasRole("STUDENT")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/my-status")
+                        .hasRole("STUDENT")
 
-    .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/pending")
-        .hasRole("TEACHER")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/pending")
+                        .hasRole("TEACHER")
 
-    .requestMatchers(HttpMethod.PUT, "/api/v1/enrollments/*/approve")
-        .hasRole("TEACHER")
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/enrollments/*/approve")
+                        .hasRole("TEACHER")
 
-    .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/teacher/batches/**").hasRole("TEACHER")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/teacher/batches/**").hasRole("TEACHER")
 
-    .requestMatchers(HttpMethod.POST,"/api/v1/enrollments/request").hasRole("STUDENT")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/enrollments/request").hasRole("STUDENT")
 
-    .requestMatchers( HttpMethod.GET,"/api/v1/enrollments/my-status").hasRole("STUDENT")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/my-status").hasRole("STUDENT")
 
-    .requestMatchers(HttpMethod.GET,"/api/v1/enrollments/teacher/batches/**").hasRole("TEACHER")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/teacher/batches/**").hasRole("TEACHER")
 
-    .requestMatchers(HttpMethod.GET,"/api/v1/enrollments/pending").hasRole("TEACHER")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/pending").hasRole("TEACHER")
 
-    .requestMatchers(HttpMethod.PUT,"/api/v1/enrollments/*/approve").hasRole("TEACHER")
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/enrollments/*/approve").hasRole("TEACHER")
 
-    .anyRequest().authenticated()
-)
-            .addFilterBefore(
-                jwtAuthenticationFilter,
-                UsernamePasswordAuthenticationFilter.class
-            );
+                        .anyRequest().authenticated())
+                .addFilterBefore(
+                        jwtAuthenticationFilter,
+                        UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
@@ -97,21 +96,17 @@ public class SecurityConfig {
         CorsConfiguration configuration = new CorsConfiguration();
 
         configuration.setAllowedOrigins(
-            List.of("http://localhost:3000")
-        );
+                List.of("http://localhost:3000"));
 
         configuration.setAllowedMethods(
-            List.of("GET", "POST", "PUT", "DELETE", "OPTIONS")
-        );
+                List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
 
         configuration.setAllowedHeaders(
-            List.of("Authorization", "Content-Type", "Accept")
-        );
+                List.of("Authorization", "Content-Type", "Accept"));
 
         configuration.setAllowCredentials(true);
 
-        UrlBasedCorsConfigurationSource source =
-            new UrlBasedCorsConfigurationSource();
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
 
         source.registerCorsConfiguration("/**", configuration);
 

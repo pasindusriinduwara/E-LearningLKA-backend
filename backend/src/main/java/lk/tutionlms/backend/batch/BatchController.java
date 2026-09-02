@@ -2,7 +2,6 @@ package lk.tutionlms.backend.batch;
 
 import java.util.List;
 
-import lk.tutionlms.backend.academic.Batch;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;

@@ -1,4 +1,4 @@
-package lk.tutionlms.backend.academic;
+package lk.tutionlms.backend.enrollment;
 
 import java.util.List;
 import java.util.UUID;
@@ -9,8 +9,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public interface EnrollmentRepository
-        extends JpaRepository<Enrollment, UUID> {
+public interface EnrollmentRepository extends JpaRepository<Enrollment, UUID> {
 
     boolean existsByStudentIdAndBatchId(
             UUID studentId,

@@ -5,16 +5,14 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import lk.tutionlms.backend.academic.BatchRepository;
-import lk.tutionlms.backend.academic.Enrollment;
-import lk.tutionlms.backend.academic.EnrollmentRepository;
+import lk.tutionlms.backend.batch.Batch;
+import lk.tutionlms.backend.batch.BatchRepository;
 import lk.tutionlms.backend.identity.Student;
 import lk.tutionlms.backend.identity.StudentRepository;
 import lk.tutionlms.backend.identity.Teacher;
 import lk.tutionlms.backend.identity.TeacherRepository;
 import lk.tutionlms.backend.identity.User;
 import lk.tutionlms.backend.identity.UserRepository;
-import lk.tutionlms.backend.academic.Batch;
 
 import lombok.RequiredArgsConstructor;
 

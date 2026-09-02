@@ -1,4 +1,4 @@
-package lk.tutionlms.backend.sheduling;
+package lk.tutionlms.backend.scheduling;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -37,6 +37,12 @@ public class ScheduleItem extends BaseEntity {
 
     @Column(name = "teacher")
     private String teacher;
+
+    @Column(name = "start_time")
+    private java.time.LocalTime startTime;
+
+    @Column(name = "end_time")
+    private java.time.LocalTime endTime;
 
     @Column(name = "time_text")
     private String time;

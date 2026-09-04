@@ -30,11 +30,9 @@ public class MaterialUploadService {
             "application/msword",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             "application/vnd.ms-powerpoint",
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-    );
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation");
     private static final Set<String> ALLOWED_EXTENSIONS = Set.of(
-            "pdf", "mp4", "png", "jpg", "jpeg", "doc", "docx", "ppt", "pptx"
-    );
+            "pdf", "mp4", "png", "jpg", "jpeg", "doc", "docx", "ppt", "pptx");
     private final Cloudinary cloudinary;
     private final MaterialRepository materialRepository;
     private final TeacherService teacherService;
@@ -44,8 +42,7 @@ public class MaterialUploadService {
             UUID batchId,
             String title,
             String subject,
-            MultipartFile file
-    ) {
+            MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A file is required");
         }
@@ -58,7 +55,8 @@ public class MaterialUploadService {
         boolean genericContentType = contentType == null || contentType.isBlank()
                 || "application/octet-stream".equals(contentType);
         if (!contentTypeAllowed && !(genericContentType && ALLOWED_EXTENSIONS.contains(extension))) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Only PDF, MP4, PNG, JPG, DOC, and PPT files are supported");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Only PDF, MP4, PNG, JPG, DOC, and PPT files are supported");
         }
         if (title == null || title.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Title is required");
@@ -79,9 +77,7 @@ public class MaterialUploadService {
                             "resource_type", "auto",
                             "folder", "tuition-lms/materials/" + batchId,
                             "use_filename", true,
-                            "unique_filename", true
-                    )
-            );
+                            "unique_filename", true));
 
         } catch (IOException | RuntimeException ex) {
             throw new ResponseStatusException(
@@ -106,21 +102,20 @@ public class MaterialUploadService {
                             .time("Uploaded just now")
                             .fileUrl(url)
                             .cloudinaryPublicId(publicId)
-                            .build()
-            );
+                            .build());
 
             return new MaterialUploadResponse(
                     material.getId(), material.getBatchId(), material.getTitle(),
                     material.getType(), material.getFileUrl());
         } catch (RuntimeException ex) {
-            
+
             try {
                 Object resourceType = result.get("resource_type");
                 cloudinary.uploader().destroy(publicId, ObjectUtils.asMap(
                         "resource_type", resourceType instanceof String ? resourceType : "auto",
                         "invalidate", true));
             } catch (Exception ignored) {
-                
+
             }
             throw ex;
         }
@@ -131,24 +126,32 @@ public class MaterialUploadService {
     }
 
     private String getExtension(String fileName) {
-        if (fileName == null) return "";
+        if (fileName == null)
+            return "";
         int dot = fileName.lastIndexOf('.');
         return dot < 0 ? "" : fileName.substring(dot + 1).toLowerCase(Locale.ROOT);
     }
 
     private String resolveResourceType(String contentType, String extension) {
-        if ("video/mp4".equals(contentType) || "mp4".equals(extension)) return "Video";
-        if ("application/pdf".equals(contentType) || "pdf".equals(extension)) return "PDF";
+        if ("video/mp4".equals(contentType) || "mp4".equals(extension))
+            return "Video";
+        if ("application/pdf".equals(contentType) || "pdf".equals(extension))
+            return "PDF";
         if ((contentType != null && contentType.startsWith("image/"))
-                || Set.of("png", "jpg", "jpeg").contains(extension)) return "Image";
-        if (Set.of("doc", "docx").contains(extension)) return "Document";
-        if (Set.of("ppt", "pptx").contains(extension)) return "Presentation";
+                || Set.of("png", "jpg", "jpeg").contains(extension))
+            return "Image";
+        if (Set.of("doc", "docx").contains(extension))
+            return "Document";
+        if (Set.of("ppt", "pptx").contains(extension))
+            return "Presentation";
         return "File";
     }
 
     private String formatFileSize(long bytes) {
-        if (bytes < 1024) return bytes + " B";
-        if (bytes < 1024 * 1024) return String.format(Locale.ROOT, "%.1f KB", bytes / 1024.0);
+        if (bytes < 1024)
+            return bytes + " B";
+        if (bytes < 1024 * 1024)
+            return String.format(Locale.ROOT, "%.1f KB", bytes / 1024.0);
         return String.format(Locale.ROOT, "%.1f MB", bytes / (1024.0 * 1024.0));
     }
 }

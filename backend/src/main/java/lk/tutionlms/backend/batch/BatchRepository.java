@@ -1,9 +1,11 @@
-package lk.tutionlms.backend.academic;
+package lk.tutionlms.backend.batch;
 
 import java.util.List;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
 
+@Repository
 public interface BatchRepository extends JpaRepository<Batch, UUID> {
 
     List<Batch> findByTeacherIdAndDeletedFalse(UUID teacherId);

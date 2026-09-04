@@ -1,4 +1,4 @@
-package lk.tutionlms.backend.sheduling;
+package lk.tutionlms.backend.scheduling;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;

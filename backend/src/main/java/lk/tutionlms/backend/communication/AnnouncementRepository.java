@@ -11,6 +11,6 @@ import org.springframework.data.repository.query.Param;
 public interface AnnouncementRepository extends JpaRepository<Announcement, UUID> {
     List<Announcement> findByDeletedFalse();
 
-    @Query("select a from Announcement a where a.deleted = false and (a.batchId in (select b.id from lk.tutionlms.backend.academic.Batch b where b.teacherId = :teacherId) or a.batchId is null)")
+    @Query("select a from Announcement a where a.deleted = false and (a.batchId in (select b.id from lk.tutionlms.backend.batch.Batch b where b.teacherId = :teacherId) or a.batchId is null)")
     List<Announcement> findByTeacherId(@Param("teacherId") UUID teacherId);
 }

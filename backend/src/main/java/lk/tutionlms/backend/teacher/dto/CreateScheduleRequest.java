@@ -1,15 +1,21 @@
 package lk.tutionlms.backend.teacher.dto;
 
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import java.util.UUID;
 
 public record CreateScheduleRequest(
-                UUID batchId,
-                String title,
-                String date, // e.g. "2026-09-01"
-                String startTime, // e.g. "04:30 PM"
-                String endTime, // e.g. "06:30 PM"
-                String location, // e.g. "Studio 2" or Zoom URL
-                String mode, // "IN_PERSON", "ONLINE", "HYBRID"
-                String repeat // "ONCE", "WEEKLY", "BI_WEEKLY"
-) {
+        @NotNull(message = "Batch ID is required") UUID batchId,
+
+        @NotBlank(message = "Title is required") String title,
+
+        @NotBlank(message = "Date is required") String date,
+
+        @NotBlank(message = "Start time is required") String startTime,
+
+        @NotBlank(message = "End time is required") String endTime,
+
+        String location,
+        String mode,
+        String repeat) {
 }

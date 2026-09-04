@@ -1,12 +1,15 @@
 package lk.tutionlms.backend.teacher;
 
 import org.springframework.transaction.annotation.Transactional;
+
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.TextStyle;
 
 import lk.tutionlms.backend.batch.*;
+import lk.tutionlms.backend.common.ScheduleConflictException;
 import lk.tutionlms.backend.communication.*;
 import lk.tutionlms.backend.content.*;
 import lk.tutionlms.backend.enrollment.*;
@@ -82,54 +85,22 @@ public class TeacherService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Batch does not belong to this teacher");
     }
 
-    @Transactional
-    public ScheduleItem createSchedule(User user, CreateScheduleRequest r) {
-        // 1. Input Validation
-        if (r.batchId() == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Batch ID is required");
+    /**
+     * Safely parses standard date string to LocalDate
+     */
+    private LocalDate parseLocalDate(String dateStr) {
+        if (dateStr == null || dateStr.isBlank()) {
+            return null;
         }
-        if (r.title() == null || r.title().trim().isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Class title is required");
+        try {
+            return LocalDate.parse(dateStr.trim(), DateTimeFormatter.ISO_LOCAL_DATE);
+        } catch (Exception ignored) {
+            try {
+                return LocalDate.parse(dateStr.trim(), DateTimeFormatter.ofPattern("MM/dd/yyyy"));
+            } catch (Exception ex) {
+                return null;
+            }
         }
-        if (r.date() == null || r.date().trim().isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Schedule date is required");
-        }
-        // 2. Verify Batch Ownership
-        verifyBatchOwnership(user, r.batchId());
-        // 3. Fetch Batch & Teacher Profile
-        Batch batch = batchRepository.findById(r.batchId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Batch not found"));
-        Teacher teacher = teacher(user);
-        String teacherDisplayName = (teacher.getName() != null && !teacher.getName().isBlank())
-                ? teacher.getName()
-                : user.getEmail();
-        // 4. Robust Date & Day of Week Parsing
-        String dayOfWeek = resolveDayOfWeek(r.date());
-        // 5. Format Time Range cleanly
-        String timeRange = formatTimeRange(r.startTime(), r.endTime());
-        LocalTime parsedStartTime = parseTime(r.startTime());
-        LocalTime parsedEndTime = parseTime(r.endTime());
-
-        // 6. Delivery Mode Fallback
-        String mode = (r.mode() != null && !r.mode().isBlank())
-                ? r.mode().toUpperCase(Locale.ROOT)
-                : (batch.getDeliveryMode() != null ? batch.getDeliveryMode() : "IN_PERSON");
-        // 7. Build and Persist Schedule Item
-        ScheduleItem item = ScheduleItem.builder()
-                .batchId(batch.getId())
-                .title(r.title().trim())
-                .subject(batch.getName())
-                .teacher(teacherDisplayName)
-                .day(dayOfWeek)
-                .date(r.date().trim())
-                .startTime(parsedStartTime)
-                .endTime(parsedEndTime)
-                .time(timeRange)
-                .location(r.location() != null ? r.location().trim() : "TBD")
-                .mode(mode)
-                .accent("#2D9F75")
-                .build();
-        return scheduleRepository.save(item);
     }
 
     /**
@@ -188,6 +159,85 @@ public class TeacherService {
             return start.trim();
         }
         return "Time not set";
+    }
+
+    @Transactional
+    public ScheduleItem createSchedule(User user, CreateScheduleRequest r) {
+        // 1. Verify batch ownership and resolve teacher
+        verifyBatchOwnership(user, r.batchId());
+        Batch batch = batchRepository.findById(r.batchId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Batch not found"));
+        Teacher teacher = teacher(user);
+
+        // 2. Parse and Validate Times (startTime must be strictly before endTime)
+        LocalTime parsedStartTime = parseTime(r.startTime());
+        LocalTime parsedEndTime = parseTime(r.endTime());
+
+        if (parsedStartTime == null || parsedEndTime == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid start or end time format");
+        }
+
+        if (!parsedStartTime.isBefore(parsedEndTime)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Start time must be strictly before end time");
+        }
+
+        // 3. Resolve the Day of Week from the selected date
+        LocalDate baseDate = parseLocalDate(r.date());
+        if (baseDate == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid date format. Expected yyyy-MM-dd");
+        }
+        DayOfWeek dayOfWeek = baseDate.getDayOfWeek();
+
+        // 4. Validate Overlap Conflicts on that Day of Week
+        List<ScheduleItem> conflicts = scheduleRepository.findConflictingSchedules(
+                teacher.getId(),
+                batch.getId(),
+                dayOfWeek,
+                parsedStartTime,
+                parsedEndTime);
+
+        if (!conflicts.isEmpty()) {
+            ScheduleItem conflict = conflicts.get(0);
+            throw new ScheduleConflictException(
+                    String.format("Schedule conflict on %s (%s - %s). Overlaps with '%s'.",
+                            dayOfWeek, r.startTime(), r.endTime(), conflict.getTitle()));
+        }
+
+        // 5. Parse Delivery Mode & Recurrence with safe fallbacks
+        DeliveryMode mode = DeliveryMode.IN_PERSON;
+        if (r.mode() != null) {
+            try {
+                mode = DeliveryMode.valueOf(r.mode().toUpperCase());
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+
+        RecurrenceType recurrence = RecurrenceType.WEEKLY;
+        if (r.repeat() != null) {
+            try {
+                recurrence = RecurrenceType.valueOf(r.repeat().toUpperCase());
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+
+        // 6. Build and persist EXACTLY ONE master record for this weekly slot
+        ScheduleItem item = ScheduleItem.builder()
+                .batchId(batch.getId())
+                .title(r.title().trim())
+                .subject(batch.getName())
+                .teacher(teacher.getName() != null ? teacher.getName() : user.getEmail())
+                .dayOfWeek(dayOfWeek)
+                .effectiveDate(baseDate)
+                .startTime(parsedStartTime)
+                .endTime(parsedEndTime)
+                .time(formatTimeRange(r.startTime(), r.endTime()))
+                .location(r.location() != null ? r.location().trim() : "TBD")
+                .mode(mode)
+                .recurrence(recurrence)
+                .accent("#2D9F75")
+                .build();
+
+        return scheduleRepository.save(item);
     }
 
 }

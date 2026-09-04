@@ -1,18 +1,19 @@
 package lk.tutionlms.backend.scheduling;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.Table;
+import jakarta.persistence.*;
 import lk.tutionlms.backend.common.BaseEntity;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import lombok.*;
+
+import java.time.DayOfWeek;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "class_schedules")
+@Table(name = "class_schedules", indexes = {
+        @Index(name = "idx_schedule_batch_day", columnList = "batch_id, day_of_week"),
+        @Index(name = "idx_schedule_day_time", columnList = "day_of_week, start_time")
+})
 @Getter
 @Setter
 @NoArgsConstructor
@@ -23,13 +24,14 @@ public class ScheduleItem extends BaseEntity {
     @Column(name = "batch_id", nullable = false)
     private UUID batchId;
 
-    @Column(name = "day_of_week")
-    private String day;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "day_of_week", nullable = false, length = 15)
+    private DayOfWeek dayOfWeek;
 
-    @Column(name = "date_text")
-    private String date;
+    @Column(name = "effective_date")
+    private LocalDate effectiveDate; // The date when this schedule starts
 
-    @Column(name = "title")
+    @Column(name = "title", nullable = false)
     private String title;
 
     @Column(name = "subject")
@@ -38,20 +40,26 @@ public class ScheduleItem extends BaseEntity {
     @Column(name = "teacher")
     private String teacher;
 
-    @Column(name = "start_time")
-    private java.time.LocalTime startTime;
+    @Column(name = "start_time", nullable = false)
+    private LocalTime startTime;
 
-    @Column(name = "end_time")
-    private java.time.LocalTime endTime;
+    @Column(name = "end_time", nullable = false)
+    private LocalTime endTime;
 
     @Column(name = "time_text")
-    private String time;
+    private String time; // Display string e.g. "04:30 PM - 06:30 PM"
 
     @Column(name = "location")
     private String location;
 
-    @Column(name = "delivery_mode")
-    private String mode;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "delivery_mode", nullable = false, length = 20)
+    private DeliveryMode mode;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "recurrence_type", nullable = false, length = 20)
+    @Builder.Default
+    private RecurrenceType recurrence = RecurrenceType.WEEKLY;
 
     @Column(name = "accent")
     private String accent;

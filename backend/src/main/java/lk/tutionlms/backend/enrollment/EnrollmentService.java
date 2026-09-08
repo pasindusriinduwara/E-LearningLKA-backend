@@ -97,9 +97,13 @@ public class EnrollmentService {
     public List<EnrollmentRequest> getPendingRequestsForTeacher(
             String teacherEmail) {
 
-        return enrollmentRequestRepository.findByStatus(
-                EnrollmentStatus.PENDING
-        );
+        User teacherUser = userRepository.findByEmail(teacherEmail)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        Teacher teacher = teacherRepository.findByUserId(teacherUser.getId())
+                .orElseThrow(() -> new IllegalArgumentException("Teacher profile not found"));
+
+        return enrollmentRequestRepository.findPendingRequestsByTeacherId(teacher.getId());
     }
 
     @Transactional

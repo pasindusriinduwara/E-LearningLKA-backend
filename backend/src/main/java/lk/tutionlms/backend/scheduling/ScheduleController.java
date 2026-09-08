@@ -37,6 +37,7 @@ public class ScheduleController {
     }
 
     @PostMapping
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN')")
     public ResponseEntity<ScheduleItem> createSchedule(@RequestBody ScheduleItem scheduleItem) {
         return ResponseEntity.ok(scheduleRepository.save(scheduleItem));
     }

@@ -11,8 +11,12 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+
+import jakarta.validation.Valid;
+
 import java.util.UUID;
 import java.util.List;
 
@@ -86,6 +90,23 @@ public class TeacherController {
             @AuthenticationPrincipal User user,
             @RequestBody CreateScheduleRequest request) {
         return service.createSchedule(user, request);
+    }
+
+    @PutMapping("/schedules/{id}")
+    public ResponseEntity<ScheduleItem> updateSchedule(
+            @AuthenticationPrincipal User user,
+            @PathVariable UUID id,
+            @Valid @RequestBody UpdateScheduleRequest request) {
+        ScheduleItem updated = service.updateSchedule(user, id, request);
+        return ResponseEntity.ok(updated);
+    }
+
+    @DeleteMapping("/schedules/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteSchedule(
+            @AuthenticationPrincipal User user,
+            @PathVariable UUID id) {
+        service.deleteSchedule(user, id);
     }
 
 }

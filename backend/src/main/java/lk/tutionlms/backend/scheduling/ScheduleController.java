@@ -24,6 +24,11 @@ public class ScheduleController {
         return ResponseEntity.ok(scheduleRepository.findByDeletedFalse());
     }
 
+    @GetMapping("/batch/{batchId}")
+    public ResponseEntity<List<ScheduleItem>> getBatchSchedules(@PathVariable UUID batchId) {
+        return ResponseEntity.ok(scheduleRepository.findByBatchIdAndDeletedFalse(batchId));
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<ScheduleItem> getScheduleById(@PathVariable UUID id) {
         return scheduleRepository.findById(id)
@@ -32,6 +37,7 @@ public class ScheduleController {
     }
 
     @PostMapping
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN')")
     public ResponseEntity<ScheduleItem> createSchedule(@RequestBody ScheduleItem scheduleItem) {
         return ResponseEntity.ok(scheduleRepository.save(scheduleItem));
     }

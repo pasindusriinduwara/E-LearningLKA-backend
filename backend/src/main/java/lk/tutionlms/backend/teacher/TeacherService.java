@@ -240,4 +240,103 @@ public class TeacherService {
         return scheduleRepository.save(item);
     }
 
+    @Transactional
+    public ScheduleItem updateSchedule(User user, UUID scheduleId, UpdateScheduleRequest r) {
+        Teacher currentTeacher = teacher(user);
+
+        // 1. Fetch Schedule & Verify Existence
+        ScheduleItem schedule = scheduleRepository.findById(scheduleId)
+                .filter(s -> !s.isDeleted())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Schedule not found"));
+
+        // 2. IDOR Prevention: Verify current schedule belongs to current teacher
+        verifyBatchOwnership(user, schedule.getBatchId());
+
+        // 3. Verify target batch belongs to current teacher (in case they change the
+        // batch)
+        verifyBatchOwnership(user, r.batchId());
+        Batch targetBatch = batchRepository.findById(r.batchId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Batch not found"));
+
+        // 4. Validate time integrity
+        LocalTime parsedStartTime = parseTime(r.startTime());
+        LocalTime parsedEndTime = parseTime(r.endTime());
+
+        if (parsedStartTime == null || parsedEndTime == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid time format. Expected HH:mm");
+        }
+        if (!parsedStartTime.isBefore(parsedEndTime)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Start time must be strictly before end time");
+        }
+
+        LocalDate baseDate = parseLocalDate(r.date());
+        if (baseDate == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid date format. Expected yyyy-MM-dd");
+        }
+        DayOfWeek dayOfWeek = baseDate.getDayOfWeek();
+
+        // 5. Overlap Conflict Check (ignoring current schedule)
+        List<ScheduleItem> conflicts = scheduleRepository.findConflictingSchedulesExcluding(
+                scheduleId,
+                currentTeacher.getId(),
+                targetBatch.getId(),
+                dayOfWeek,
+                parsedStartTime,
+                parsedEndTime);
+
+        if (!conflicts.isEmpty()) {
+            ScheduleItem conflict = conflicts.get(0);
+            throw new ScheduleConflictException(
+                    String.format("Schedule conflict on %s (%s - %s). Overlaps with '%s'.",
+                            dayOfWeek, r.startTime(), r.endTime(), conflict.getTitle()));
+        }
+
+        // 6. Parse Enums safely
+        DeliveryMode mode = DeliveryMode.IN_PERSON;
+        if (r.mode() != null) {
+            try {
+                mode = DeliveryMode.valueOf(r.mode().toUpperCase());
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+
+        RecurrenceType recurrence = RecurrenceType.WEEKLY;
+        if (r.repeat() != null) {
+            try {
+                recurrence = RecurrenceType.valueOf(r.repeat().toUpperCase());
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+
+        // 7. Mutate Entity Fields
+        schedule.setBatchId(targetBatch.getId());
+        schedule.setTitle(r.title().trim());
+        schedule.setSubject(targetBatch.getName());
+        schedule.setTeacher(currentTeacher.getName() != null ? currentTeacher.getName() : user.getEmail());
+        schedule.setDayOfWeek(dayOfWeek);
+        schedule.setEffectiveDate(baseDate);
+        schedule.setStartTime(parsedStartTime);
+        schedule.setEndTime(parsedEndTime);
+        schedule.setTime(formatTimeRange(r.startTime(), r.endTime()));
+        schedule.setLocation(r.location() != null ? r.location().trim() : "TBD");
+        schedule.setMode(mode);
+        schedule.setRecurrence(recurrence);
+
+        return scheduleRepository.save(schedule);
+    }
+
+    @Transactional
+    public void deleteSchedule(User user, UUID scheduleId) {
+        ScheduleItem schedule = scheduleRepository.findById(scheduleId)
+                .filter(s -> !s.isDeleted())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Schedule not found"));
+
+        // IDOR check: verify ownership
+        verifyBatchOwnership(user, schedule.getBatchId());
+
+        // Soft delete: keep historical records intact
+        schedule.setDeleted(true);
+        scheduleRepository.save(schedule);
+    }
+
 }

@@ -1,3 +1,4 @@
+
 <# : batch portion
 @REM ----------------------------------------------------------------------------
 @REM Licensed to the Apache Software Foundation (ASF) under one
@@ -46,7 +47,9 @@
 : end batch / begin powershell #>
 
 $ErrorActionPreference = "Stop"
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+if (!$scriptDir) {
+  $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+}
 if ($env:MVNW_VERBOSE -eq "true") {
   $VerbosePreference = "Continue"
 }

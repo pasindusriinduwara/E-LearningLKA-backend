@@ -43,11 +43,16 @@ public class AuthenticationService {
             throw new RuntimeException("Email already in use");
         }
 
+        String rawRole = request.getUserType() == null ? "STUDENT" : request.getUserType().trim().toUpperCase();
+        if (!"STUDENT".equals(rawRole) && !"TEACHER".equals(rawRole)) {
+            throw new IllegalArgumentException("Registration role must be STUDENT or TEACHER.");
+        }
+
         var user = User.builder()
                 .email(request.getEmail())
                 .password(passwordEncoder.encode(request.getPassword()))
                 .phoneNumber(request.getPhoneNumber())
-                .userType(request.getUserType())
+                .userType(rawRole)
                 .status("ACTIVE")
                 .build();
 

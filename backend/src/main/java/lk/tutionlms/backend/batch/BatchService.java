@@ -2,8 +2,6 @@ package lk.tutionlms.backend.batch;
 
 import java.util.List;
 
-import lk.tutionlms.backend.academic.Batch;
-import lk.tutionlms.backend.academic.BatchRepository;
 import lk.tutionlms.backend.academic.Subject;
 import lk.tutionlms.backend.academic.SubjectRepository;
 import lk.tutionlms.backend.identity.Teacher;

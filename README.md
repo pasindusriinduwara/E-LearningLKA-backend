@@ -5,9 +5,9 @@
 Set the Cloudinary credentials in the same PowerShell session used to start the Backend:
 
 ```powershell
-$env:CLOUDINARY_CLOUD_NAME = "duwtj2wa7"
-$env:CLOUDINARY_API_KEY = "423854672574226"
-$env:CLOUDINARY_API_SECRET= "tuVirGvc08f0_AxwrFENCvpdFl8"
+$env:CLOUDINARY_CLOUD_NAME = "your_cloudinary_cloud_name"
+$env:CLOUDINARY_API_KEY = "your_cloudinary_api_key"
+$env:CLOUDINARY_API_SECRET = "your_cloudinary_api_secret"
 ```
 
 The teacher endpoint is:

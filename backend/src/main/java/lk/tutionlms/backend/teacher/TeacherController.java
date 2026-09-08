@@ -58,9 +58,24 @@ public class TeacherController {
         return service.materials(u);
     }
 
+    @GetMapping("/batches/{batchId}/materials")
+    public List<LearningMaterial> batchMaterials(
+            @AuthenticationPrincipal User u,
+            @PathVariable UUID batchId) {
+        return service.batchMaterials(u, batchId);
+    }
+
     @PostMapping("/materials")
-    public LearningMaterial createMaterial(@AuthenticationPrincipal User u, @RequestBody CreateMaterialRequest r) {
+    public LearningMaterial createMaterial(@AuthenticationPrincipal User u, @Valid @RequestBody CreateMaterialRequest r) {
         return service.createMaterial(u, r);
+    }
+
+    @DeleteMapping("/materials/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteMaterial(
+            @AuthenticationPrincipal User user,
+            @PathVariable UUID id) {
+        service.deleteMaterial(user, id);
     }
 
     @PostMapping(value = "/materials/upload", consumes = "multipart/form-data")
@@ -79,9 +94,24 @@ public class TeacherController {
         return service.announcements(u);
     }
 
+    @GetMapping("/batches/{batchId}/announcements")
+    public List<Announcement> batchAnnouncements(
+            @AuthenticationPrincipal User u,
+            @PathVariable UUID batchId) {
+        return service.batchAnnouncements(u, batchId);
+    }
+
     @PostMapping("/announcements")
-    public Announcement createAnnouncement(@AuthenticationPrincipal User u, @RequestBody CreateAnnouncementRequest r) {
+    public Announcement createAnnouncement(@AuthenticationPrincipal User u, @Valid @RequestBody CreateAnnouncementRequest r) {
         return service.createAnnouncement(u, r);
+    }
+
+    @DeleteMapping("/announcements/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteAnnouncement(
+            @AuthenticationPrincipal User user,
+            @PathVariable UUID id) {
+        service.deleteAnnouncement(user, id);
     }
 
     @PostMapping("/schedules")

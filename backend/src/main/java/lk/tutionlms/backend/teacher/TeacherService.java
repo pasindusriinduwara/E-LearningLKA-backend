@@ -66,6 +66,13 @@ public class TeacherService {
                 materialRepository.findByTeacherId(id).size());
     }
 
+    @Transactional(readOnly = true)
+    public List<LearningMaterial> batchMaterials(User user, UUID batchId) {
+        verifyBatchOwnership(user, batchId);
+        return materialRepository.findByBatchIdAndDeletedFalseOrderByCreatedAtDesc(batchId);
+    }
+
+    @Transactional
     public LearningMaterial createMaterial(User user, CreateMaterialRequest r) {
         verifyBatchOwnership(user, r.batchId());
         return materialRepository
@@ -73,11 +80,40 @@ public class TeacherService {
                         .type(r.type()).time(r.time()).size(r.size()).fileUrl(r.fileUrl()).build());
     }
 
+    @Transactional
+    public void deleteMaterial(User user, UUID materialId) {
+        LearningMaterial material = materialRepository.findById(materialId)
+                .filter(m -> !m.isDeleted())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Material not found"));
+        verifyBatchOwnership(user, material.getBatchId());
+        material.setDeleted(true);
+        materialRepository.save(material);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Announcement> batchAnnouncements(User user, UUID batchId) {
+        verifyBatchOwnership(user, batchId);
+        return announcementRepository.findByBatchIdAndDeletedFalseOrderByCreatedAtDesc(batchId);
+    }
+
+    @Transactional
     public Announcement createAnnouncement(User user, CreateAnnouncementRequest r) {
         if (r.batchId() != null)
             verifyBatchOwnership(user, r.batchId());
         return announcementRepository.save(Announcement.builder().batchId(r.batchId()).title(r.title())
                 .description(r.description()).type(r.type()).time(r.time()).build());
+    }
+
+    @Transactional
+    public void deleteAnnouncement(User user, UUID announcementId) {
+        Announcement announcement = announcementRepository.findById(announcementId)
+                .filter(a -> !a.isDeleted())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Announcement not found"));
+        if (announcement.getBatchId() != null) {
+            verifyBatchOwnership(user, announcement.getBatchId());
+        }
+        announcement.setDeleted(true);
+        announcementRepository.save(announcement);
     }
 
     public void verifyBatchOwnership(User user, UUID batchId) {

@@ -24,6 +24,11 @@ public class ScheduleController {
         return ResponseEntity.ok(scheduleRepository.findByDeletedFalse());
     }
 
+    @GetMapping("/batch/{batchId}")
+    public ResponseEntity<List<ScheduleItem>> getBatchSchedules(@PathVariable UUID batchId) {
+        return ResponseEntity.ok(scheduleRepository.findByBatchIdAndDeletedFalse(batchId));
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<ScheduleItem> getScheduleById(@PathVariable UUID id) {
         return scheduleRepository.findById(id)

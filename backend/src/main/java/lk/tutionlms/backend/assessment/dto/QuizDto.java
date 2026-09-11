@@ -22,10 +22,13 @@ public class QuizDto {
     public static class CreateQuizRequest {
         private UUID batchId;
         private String title;
-        private String assessmentType; // MCQ_QUIZ
+        private String assessmentType; // MCQ_QUIZ, ESSAY, ASSIGNMENT
         private BigDecimal totalMarks;
         private LocalDateTime dueDate;
         private Integer durationMinutes;
+        private String attachmentUrl;
+        private String instructions;
+        private String submissionType; // FILE_UPLOAD, TEXT, BOTH
         @Builder.Default
         private List<QuestionInputDto> questions = new ArrayList<>();
     }
@@ -106,6 +109,11 @@ public class QuizDto {
         private boolean submitted;
         private BigDecimal scoreObtained;
         private String grade;
+        private String attachmentUrl;
+        private String instructions;
+        private String submissionType;
+        private String paperUploadUrl;
+        private String feedback;
         private LocalDateTime createdAt;
     }
 
@@ -142,6 +150,9 @@ public class QuizDto {
         private BigDecimal totalMarks;
         private Integer durationMinutes;
         private LocalDateTime dueDate;
+        private String attachmentUrl;
+        private String instructions;
+        private String submissionType;
         private List<StudentQuestionDto> questions;
     }
 
@@ -241,5 +252,28 @@ public class QuizDto {
         private BigDecimal marks;
         private BigDecimal totalMarks;
         private String grade;
+        private String paperUploadUrl;
+        private String answerText;
+        private String feedback;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class EssaySubmissionRequest {
+        private String studentId;
+        private String answerText;
+        private String paperUploadUrl;
+        private String fileName;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class GradeSubmissionRequest {
+        private BigDecimal scoreObtained;
+        private String feedback;
     }
 }

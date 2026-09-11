@@ -9,6 +9,10 @@ import lk.tutionlms.backend.identity.User;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.cloudinary.Cloudinary;
+import com.cloudinary.utils.ObjectUtils;
+import org.springframework.web.multipart.MultipartFile;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
@@ -23,18 +27,21 @@ public class AssessmentService {
     private final BatchRepository batchRepository;
     private final SubmissionRepository submissionRepository;
     private final StudentRepository studentRepository;
+    private final Cloudinary cloudinary;
 
     public AssessmentService(
             AssessmentRepository assessmentRepository,
             QuestionRepository questionRepository,
             BatchRepository batchRepository,
             SubmissionRepository submissionRepository,
-            StudentRepository studentRepository) {
+            StudentRepository studentRepository,
+            Cloudinary cloudinary) {
         this.assessmentRepository = assessmentRepository;
         this.questionRepository = questionRepository;
         this.batchRepository = batchRepository;
         this.submissionRepository = submissionRepository;
         this.studentRepository = studentRepository;
+        this.cloudinary = cloudinary;
     }
 
     @Transactional
@@ -65,6 +72,9 @@ public class AssessmentService {
                 .totalMarks(request.getTotalMarks() != null ? request.getTotalMarks() : new BigDecimal("100.00"))
                 .durationMinutes(request.getDurationMinutes() != null ? request.getDurationMinutes() : 60)
                 .dueDate(request.getDueDate() != null ? request.getDueDate() : LocalDateTime.now().plusDays(7))
+                .attachmentUrl(request.getAttachmentUrl())
+                .instructions(request.getInstructions())
+                .submissionType(request.getSubmissionType() != null ? request.getSubmissionType() : "BOTH")
                 .hidden(false)
                 .build();
 
@@ -136,8 +146,15 @@ public class AssessmentService {
                         Submission sub = studentSubmissions.get(a.getId());
                         summary.setSubmitted(true);
                         summary.setScoreObtained(sub.getScoreObtained());
-                        summary.setStatus("Graded");
-                        summary.setGrade(calculateGrade(sub.getScoreObtained(), a.getTotalMarks()));
+                        summary.setPaperUploadUrl(sub.getPaperUploadUrl());
+                        summary.setFeedback(sub.getFeedback());
+                        String subStatus = "GRADED".equalsIgnoreCase(sub.getStatus()) ? "Graded" : "Submitted";
+                        summary.setStatus(subStatus);
+                        if ("Graded".equals(subStatus) && sub.getScoreObtained() != null) {
+                            summary.setGrade(calculateGrade(sub.getScoreObtained(), a.getTotalMarks()));
+                        } else {
+                            summary.setGrade(null);
+                        }
                     } else {
                         summary.setSubmitted(false);
                     }
@@ -225,6 +242,9 @@ public class AssessmentService {
                 .totalMarks(assessment.getTotalMarks())
                 .durationMinutes(assessment.getDurationMinutes())
                 .dueDate(assessment.getDueDate())
+                .attachmentUrl(assessment.getAttachmentUrl())
+                .instructions(assessment.getInstructions())
+                .submissionType(assessment.getSubmissionType())
                 .questions(studentQuestions)
                 .build();
     }
@@ -431,17 +451,205 @@ public class AssessmentService {
 
             String grade = calculateGrade(s.getScoreObtained(), assessment.getTotalMarks());
 
+            String status = "GRADED".equalsIgnoreCase(s.getStatus()) ? "Graded" : "Needs Grading";
+
+            String answerText = "";
+            if (s.getAnswers() != null && !s.getAnswers().isEmpty()) {
+                answerText = s.getAnswers().get(0).getAnswerText();
+            }
+
             return QuizDto.AssessmentSubmissionSummary.builder()
                     .id(s.getId())
                     .studentId(studentCode)
                     .studentName(studentName)
                     .submittedAt(formattedTime)
-                    .status("Submitted")
+                    .status(status)
                     .marks(s.getScoreObtained())
                     .totalMarks(assessment.getTotalMarks())
                     .grade(grade)
+                    .paperUploadUrl(s.getPaperUploadUrl())
+                    .answerText(answerText)
+                    .feedback(s.getFeedback())
                     .build();
         }).collect(Collectors.toList());
+    }
+
+    /**
+     * Submit an essay/structured paper assignment.
+     */
+    @Transactional
+    public QuizDto.QuizSubmissionResultResponse submitEssay(
+            UUID assessmentId,
+            QuizDto.EssaySubmissionRequest request,
+            User currentUser) {
+
+        Assessment assessment = getAssessmentById(assessmentId);
+
+        UUID studentId = resolveStudentId(currentUser, request != null ? request.getStudentId() : null);
+        if (studentId == null) {
+            studentId = ensureDefaultStudentId();
+        }
+
+        Optional<Submission> existing = submissionRepository.findByAssessmentAndStudentWithAnswers(assessmentId, studentId);
+        Submission submission;
+        if (existing.isPresent()) {
+            submission = existing.get();
+            if (request != null && request.getPaperUploadUrl() != null && !request.getPaperUploadUrl().isBlank()) {
+                submission.setPaperUploadUrl(request.getPaperUploadUrl());
+            }
+            submission.setSubmittedAt(LocalDateTime.now());
+            submission.setStatus("SUBMITTED");
+            if (request != null && request.getAnswerText() != null) {
+                if (submission.getAnswers() != null && !submission.getAnswers().isEmpty()) {
+                    submission.getAnswers().get(0).setAnswerText(request.getAnswerText());
+                } else {
+                    SubmissionAnswer sa = SubmissionAnswer.builder()
+                            .submission(submission)
+                            .questionId(assessment.getQuestions() != null && !assessment.getQuestions().isEmpty()
+                                    ? assessment.getQuestions().get(0).getId() : UUID.randomUUID())
+                            .answerText(request.getAnswerText())
+                            .isCorrect(false)
+                            .marksAwarded(BigDecimal.ZERO)
+                            .build();
+                    submission.getAnswers().add(sa);
+                }
+            }
+        } else {
+            submission = Submission.builder()
+                    .assessmentId(assessmentId)
+                    .studentId(studentId)
+                    .submittedAt(LocalDateTime.now())
+                    .status("SUBMITTED")
+                    .paperUploadUrl(request != null ? request.getPaperUploadUrl() : null)
+                    .scoreObtained(null)
+                    .answers(new ArrayList<>())
+                    .build();
+
+            if (request != null && request.getAnswerText() != null) {
+                SubmissionAnswer sa = SubmissionAnswer.builder()
+                        .submission(submission)
+                        .questionId(assessment.getQuestions() != null && !assessment.getQuestions().isEmpty()
+                                ? assessment.getQuestions().get(0).getId() : UUID.randomUUID())
+                        .answerText(request.getAnswerText())
+                        .isCorrect(false)
+                        .marksAwarded(BigDecimal.ZERO)
+                        .build();
+                submission.getAnswers().add(sa);
+            }
+        }
+
+        submission = submissionRepository.save(submission);
+
+        return QuizDto.QuizSubmissionResultResponse.builder()
+                .submissionId(submission.getId())
+                .assessmentId(assessment.getId())
+                .title(assessment.getTitle())
+                .scoreObtained(submission.getScoreObtained())
+                .totalMarks(assessment.getTotalMarks())
+                .percentage(0.0)
+                .grade("Submitted")
+                .correctCount(0)
+                .totalQuestions(1)
+                .submittedAt(submission.getSubmittedAt())
+                .answers(new ArrayList<>())
+                .build();
+    }
+
+    /**
+     * Teacher evaluation and grading of a submission.
+     */
+    @Transactional
+    public QuizDto.AssessmentSubmissionSummary gradeSubmission(
+            UUID assessmentId,
+            UUID submissionId,
+            QuizDto.GradeSubmissionRequest request) {
+
+        Submission submission = submissionRepository.findById(submissionId)
+                .orElseThrow(() -> new IllegalArgumentException("Submission not found with id: " + submissionId));
+
+        Assessment assessment = getAssessmentById(assessmentId);
+
+        submission.setScoreObtained(request.getScoreObtained());
+        submission.setFeedback(request.getFeedback());
+        submission.setStatus("GRADED");
+        submission = submissionRepository.save(submission);
+
+        String grade = calculateGrade(submission.getScoreObtained(), assessment.getTotalMarks());
+        String studentName = "Student";
+        String studentCode = "ST-ACTIVE";
+        Optional<Student> studentOpt = studentRepository.findById(submission.getStudentId());
+        if (studentOpt.isPresent()) {
+            studentName = studentOpt.get().getName();
+            studentCode = studentOpt.get().getStudentId();
+        }
+
+        String answerText = "";
+        if (submission.getAnswers() != null && !submission.getAnswers().isEmpty()) {
+            answerText = submission.getAnswers().get(0).getAnswerText();
+        }
+
+        return QuizDto.AssessmentSubmissionSummary.builder()
+                .id(submission.getId())
+                .studentId(studentCode)
+                .studentName(studentName)
+                .submittedAt(submission.getSubmittedAt() != null ? submission.getSubmittedAt().toString() : "")
+                .status("Graded")
+                .marks(submission.getScoreObtained())
+                .totalMarks(assessment.getTotalMarks())
+                .grade(grade)
+                .paperUploadUrl(submission.getPaperUploadUrl())
+                .answerText(answerText)
+                .feedback(submission.getFeedback())
+                .build();
+    }
+
+    /**
+     * Upload question paper or answer sheet.
+     */
+    public Map<String, String> uploadPaperFile(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("File cannot be empty");
+        }
+        String originalName = file.getOriginalFilename() != null ? file.getOriginalFilename() : "paper.pdf";
+        try {
+            if (cloudinary != null) {
+                Map<?, ?> uploadResult = cloudinary.uploader().upload(
+                        file.getBytes(),
+                        ObjectUtils.asMap(
+                                "resource_type", "auto",
+                                "folder", "tuition-lms/assessments",
+                                "use_filename", true,
+                                "unique_filename", true));
+                String secureUrl = (String) uploadResult.get("secure_url");
+                if (secureUrl != null && !secureUrl.isBlank()) {
+                    Map<String, String> response = new HashMap<>();
+                    response.put("url", secureUrl);
+                    response.put("fileName", originalName);
+                    return response;
+                }
+            }
+        } catch (Exception e) {
+            // Log and fallback to local file storage
+            System.err.println("Cloudinary paper upload failed, falling back to local storage: " + e.getMessage());
+        }
+
+        // Local storage fallback
+        try {
+            java.nio.file.Path uploadDir = java.nio.file.Paths.get("uploads", "assessments");
+            if (!java.nio.file.Files.exists(uploadDir)) {
+                java.nio.file.Files.createDirectories(uploadDir);
+            }
+            String uniqueName = UUID.randomUUID() + "_" + originalName.replaceAll("[^a-zA-Z0-9.-]", "_");
+            java.nio.file.Path targetPath = uploadDir.resolve(uniqueName);
+            java.nio.file.Files.copy(file.getInputStream(), targetPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+
+            Map<String, String> response = new HashMap<>();
+            response.put("url", "/api/v1/assessments/files/" + uniqueName);
+            response.put("fileName", originalName);
+            return response;
+        } catch (Exception ex) {
+            throw new RuntimeException("Failed to store paper file locally: " + ex.getMessage(), ex);
+        }
     }
 
     private String calculateGrade(BigDecimal score, BigDecimal totalMarks) {
@@ -564,6 +772,9 @@ public class AssessmentService {
                 .totalMarks(a.getTotalMarks())
                 .dueDate(a.getDueDate())
                 .durationMinutes(a.getDurationMinutes())
+                .attachmentUrl(a.getAttachmentUrl())
+                .instructions(a.getInstructions())
+                .submissionType(a.getSubmissionType())
                 .questionCount(a.getQuestions() != null ? a.getQuestions().size() : 0)
                 .status(status)
                 .hidden(a.isHidden())

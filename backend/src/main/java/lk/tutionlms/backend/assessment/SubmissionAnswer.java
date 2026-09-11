@@ -28,6 +28,9 @@ public class SubmissionAnswer extends BaseEntity {
     @Column(name = "selected_option_id")
     private UUID selectedOptionId;
 
+    @Column(name = "answer_text", columnDefinition = "TEXT")
+    private String answerText;
+
     @Column(name = "is_correct", nullable = false)
     @Builder.Default
     private Boolean isCorrect = false;

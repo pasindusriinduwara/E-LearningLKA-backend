@@ -134,6 +134,74 @@ public class AssessmentController {
      }
 
     /**
+     * Submit an essay-type or paper assignment.
+     */
+    @PostMapping("/{id}/submit-essay")
+    public ResponseEntity<?> submitEssay(
+            @PathVariable UUID id,
+            @RequestBody QuizDto.EssaySubmissionRequest request,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal lk.tutionlms.backend.identity.User currentUser) {
+        try {
+            QuizDto.QuizSubmissionResultResponse result = assessmentService.submitEssay(id, request, currentUser);
+            return ResponseEntity.ok(result);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    /**
+     * Teacher evaluation and grading of a student's submission.
+     */
+    @PostMapping("/{id}/submissions/{submissionId}/grade")
+    public ResponseEntity<?> gradeSubmission(
+            @PathVariable UUID id,
+            @PathVariable UUID submissionId,
+            @RequestBody QuizDto.GradeSubmissionRequest request) {
+        try {
+            QuizDto.AssessmentSubmissionSummary result = assessmentService.gradeSubmission(id, submissionId, request);
+            return ResponseEntity.ok(result);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    /**
+     * Upload question paper or answer sheet.
+     */
+    @PostMapping("/upload-paper")
+    public ResponseEntity<?> uploadPaperFile(@RequestParam("file") MultipartFile file) {
+        try {
+            return ResponseEntity.ok(assessmentService.uploadPaperFile(file));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(java.util.Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * Serve locally stored assessment files.
+     */
+    @GetMapping("/files/{filename}")
+    public ResponseEntity<org.springframework.core.io.Resource> serveFile(@PathVariable String filename) {
+        try {
+            java.nio.file.Path filePath = java.nio.file.Paths.get("uploads", "assessments").resolve(filename).normalize();
+            org.springframework.core.io.Resource resource = new org.springframework.core.io.UrlResource(filePath.toUri());
+            if (resource.exists() && resource.isReadable()) {
+                String contentType = "application/octet-stream";
+                if (filename.endsWith(".pdf")) contentType = "application/pdf";
+                else if (filename.endsWith(".png")) contentType = "image/png";
+                else if (filename.endsWith(".jpg") || filename.endsWith(".jpeg")) contentType = "image/jpeg";
+                return ResponseEntity.ok()
+                        .header(org.springframework.http.HttpHeaders.CONTENT_TYPE, contentType)
+                        .body(resource);
+            } else {
+                return ResponseEntity.notFound().build();
+            }
+        } catch (Exception e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    /**
      * Get all student submissions for an assessment (Teacher view).
      */
     @GetMapping("/{id}/submissions")

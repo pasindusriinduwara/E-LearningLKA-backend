@@ -44,6 +44,16 @@ public class Assessment extends BaseEntity {
     @Builder.Default
     private Boolean hidden = false;
 
+    @Column(name = "attachment_url", length = 500)
+    private String attachmentUrl;
+
+    @Column(columnDefinition = "TEXT")
+    private String instructions;
+
+    @Column(name = "submission_type", length = 30)
+    @Builder.Default
+    private String submissionType = "BOTH";
+
     public boolean isHidden() {
         return Boolean.TRUE.equals(this.hidden);
     }

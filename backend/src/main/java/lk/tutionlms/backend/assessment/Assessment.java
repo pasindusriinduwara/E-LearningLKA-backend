@@ -42,7 +42,11 @@ public class Assessment extends BaseEntity {
 
     @Column(name = "is_hidden")
     @Builder.Default
-    private boolean hidden = false;
+    private Boolean hidden = false;
+
+    public boolean isHidden() {
+        return Boolean.TRUE.equals(this.hidden);
+    }
 
     @OneToMany(mappedBy = "assessment", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("displayOrder ASC")

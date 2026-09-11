@@ -116,7 +116,7 @@ public class AssessmentService {
     }
 
     @Transactional(readOnly = true)
-    public List<QuizDto.AssessmentSummaryResponse> getStudentAssessments(User currentUser, UUID studentIdParam) {
+    public List<QuizDto.AssessmentSummaryResponse> getStudentAssessments(User currentUser, String studentIdParam) {
         UUID studentId = resolveStudentId(currentUser, studentIdParam);
         if (studentId == null) {
             studentId = ensureDefaultStudentId();
@@ -320,7 +320,7 @@ public class AssessmentService {
     @Transactional(readOnly = true)
     public QuizDto.QuizSubmissionResultResponse getStudentSubmission(
             UUID assessmentId,
-            UUID studentIdParam,
+            String studentIdParam,
             User currentUser) {
 
         Assessment assessment = getAssessmentById(assessmentId);
@@ -457,22 +457,34 @@ public class AssessmentService {
         return "F";
     }
 
-    private UUID resolveStudentId(User currentUser, UUID explicitStudentId) {
+    private UUID resolveStudentId(User currentUser, String explicitStudentId) {
         if (currentUser != null) {
             Optional<Student> student = studentRepository.findByUserId(currentUser.getId());
             if (student.isPresent()) {
                 return student.get().getId();
             }
         }
-        if (explicitStudentId != null) {
-            if (studentRepository.existsById(explicitStudentId)) {
-                return explicitStudentId;
+        if (explicitStudentId != null && !explicitStudentId.isBlank()) {
+            Optional<Student> byCode = studentRepository.findByStudentId(explicitStudentId.trim());
+            if (byCode.isPresent()) {
+                return byCode.get().getId();
+            }
+            try {
+                UUID parsed = UUID.fromString(explicitStudentId.trim());
+                if (studentRepository.existsById(parsed)) {
+                    return parsed;
+                }
+            } catch (IllegalArgumentException ignored) {
             }
         }
         return null;
     }
 
     private UUID ensureDefaultStudentId() {
+        Optional<Student> byCode = studentRepository.findByStudentId("ST-NEW001");
+        if (byCode.isPresent()) {
+            return byCode.get().getId();
+        }
         List<Student> students = studentRepository.findAll();
         if (!students.isEmpty()) {
             return students.get(0).getId();

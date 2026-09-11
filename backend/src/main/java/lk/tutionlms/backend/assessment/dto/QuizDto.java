@@ -172,7 +172,7 @@ public class QuizDto {
     @AllArgsConstructor
     @Builder
     public static class QuizSubmissionRequest {
-        private UUID studentId;
+        private String studentId;
         private List<StudentAnswerInput> answers;
     }
 

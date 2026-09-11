@@ -404,6 +404,46 @@ public class AssessmentService {
                 .build();
     }
 
+    /**
+     * Get all student submissions for an assessment (Teacher view).
+     */
+    @Transactional(readOnly = true)
+    public List<QuizDto.AssessmentSubmissionSummary> getAssessmentSubmissions(UUID assessmentId) {
+        Assessment assessment = assessmentRepository.findById(assessmentId)
+                .filter(a -> !a.isDeleted())
+                .orElseThrow(() -> new IllegalArgumentException("Assessment not found with id: " + assessmentId));
+
+        List<Submission> submissions = submissionRepository.findByAssessmentIdAndDeletedFalseOrderBySubmittedAtDesc(assessmentId);
+
+        return submissions.stream().map(s -> {
+            String studentName = "Student";
+            String studentCode = "ST-ACTIVE";
+
+            Optional<Student> studentOpt = studentRepository.findById(s.getStudentId());
+            if (studentOpt.isPresent()) {
+                studentName = studentOpt.get().getName();
+                studentCode = studentOpt.get().getStudentId();
+            }
+
+            String formattedTime = s.getSubmittedAt() != null
+                    ? s.getSubmittedAt().format(java.time.format.DateTimeFormatter.ofPattern("dd MMM yyyy, hh:mm a"))
+                    : "Submitted";
+
+            String grade = calculateGrade(s.getScoreObtained(), assessment.getTotalMarks());
+
+            return QuizDto.AssessmentSubmissionSummary.builder()
+                    .id(s.getId())
+                    .studentId(studentCode)
+                    .studentName(studentName)
+                    .submittedAt(formattedTime)
+                    .status("Submitted")
+                    .marks(s.getScoreObtained())
+                    .totalMarks(assessment.getTotalMarks())
+                    .grade(grade)
+                    .build();
+        }).collect(Collectors.toList());
+    }
+
     private String calculateGrade(BigDecimal score, BigDecimal totalMarks) {
         if (score == null || totalMarks == null || totalMarks.compareTo(BigDecimal.ZERO) <= 0) {
             return "N/A";

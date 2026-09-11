@@ -227,4 +227,19 @@ public class QuizDto {
         private String optionText;
         private boolean isCorrect;
     }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class AssessmentSubmissionSummary {
+        private UUID id;
+        private String studentId;
+        private String studentName;
+        private String submittedAt;
+        private String status;
+        private BigDecimal marks;
+        private BigDecimal totalMarks;
+        private String grade;
+    }
 }

@@ -134,6 +134,18 @@ public class AssessmentController {
     }
 
     /**
+     * Get all student submissions for an assessment (Teacher view).
+     */
+    @GetMapping("/{id}/submissions")
+    public ResponseEntity<?> getAssessmentSubmissions(@PathVariable UUID id) {
+        try {
+            return ResponseEntity.ok(assessmentService.getAssessmentSubmissions(id));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage());
+        }
+    }
+
+    /**
      * Get all assessments for a batch.
      */
     @GetMapping("/batch/{batchId}")

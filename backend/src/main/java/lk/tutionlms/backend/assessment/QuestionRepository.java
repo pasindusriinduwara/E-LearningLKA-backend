@@ -10,4 +10,7 @@ import java.util.UUID;
 public interface QuestionRepository extends JpaRepository<Question, UUID> {
 
     List<Question> findByAssessmentIdAndDeletedFalseOrderByDisplayOrderAsc(UUID assessmentId);
+
+    @org.springframework.data.jpa.repository.Query("SELECT DISTINCT q FROM Question q LEFT JOIN FETCH q.options WHERE q.assessment.id = :assessmentId AND q.deleted = false ORDER BY q.displayOrder ASC")
+    List<Question> findByAssessmentIdWithOptions(@org.springframework.data.repository.query.Param("assessmentId") UUID assessmentId);
 }

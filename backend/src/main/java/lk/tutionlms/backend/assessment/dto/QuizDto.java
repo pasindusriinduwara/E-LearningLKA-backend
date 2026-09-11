@@ -103,6 +103,9 @@ public class QuizDto {
         private int submissionsCount;
         private int totalStudents;
         private boolean hidden;
+        private boolean submitted;
+        private BigDecimal scoreObtained;
+        private String grade;
         private LocalDateTime createdAt;
     }
 
@@ -124,5 +127,104 @@ public class QuizDto {
     @Builder
     public static class ParseTextRequest {
         private String rawText;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class StudentQuizTakeResponse {
+        private UUID id;
+        private String title;
+        private UUID batchId;
+        private String batchName;
+        private String assessmentType;
+        private BigDecimal totalMarks;
+        private Integer durationMinutes;
+        private LocalDateTime dueDate;
+        private List<StudentQuestionDto> questions;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class StudentQuestionDto {
+        private UUID id;
+        private String questionText;
+        private int displayOrder;
+        private BigDecimal marks;
+        private List<StudentOptionDto> options;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class StudentOptionDto {
+        private UUID id;
+        private String optionText;
+        private int displayOrder;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class QuizSubmissionRequest {
+        private UUID studentId;
+        private List<StudentAnswerInput> answers;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class StudentAnswerInput {
+        private UUID questionId;
+        private UUID selectedOptionId;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class QuizSubmissionResultResponse {
+        private UUID submissionId;
+        private UUID assessmentId;
+        private String title;
+        private BigDecimal scoreObtained;
+        private BigDecimal totalMarks;
+        private double percentage;
+        private String grade;
+        private int correctCount;
+        private int totalQuestions;
+        private LocalDateTime submittedAt;
+        private List<ReviewAnswerDto> answers;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class ReviewAnswerDto {
+        private UUID questionId;
+        private String questionText;
+        private UUID selectedOptionId;
+        private UUID correctOptionId;
+        private boolean isCorrect;
+        private BigDecimal marksAwarded;
+        private String explanation;
+        private List<ReviewOptionDto> options;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class ReviewOptionDto {
+        private UUID id;
+        private String optionText;
+        private boolean isCorrect;
     }
 }

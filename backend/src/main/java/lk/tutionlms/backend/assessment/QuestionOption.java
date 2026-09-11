@@ -31,4 +31,8 @@ public class QuestionOption {
     @Column(name = "is_correct", nullable = false)
     @Builder.Default
     private Boolean correct = false;
+
+    public boolean isCorrect() {
+        return Boolean.TRUE.equals(this.correct);
+    }
 }

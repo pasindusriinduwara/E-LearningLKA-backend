@@ -82,8 +82,55 @@ public class AssessmentController {
      * Get visible assessments for students (non-hidden, non-deleted).
      */
     @GetMapping("/student")
-    public ResponseEntity<List<QuizDto.AssessmentSummaryResponse>> getStudentAssessments() {
-        return ResponseEntity.ok(assessmentService.getStudentAssessments());
+    public ResponseEntity<List<QuizDto.AssessmentSummaryResponse>> getStudentAssessments(
+            @RequestParam(required = false) UUID studentId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal lk.tutionlms.backend.identity.User currentUser) {
+        return ResponseEntity.ok(assessmentService.getStudentAssessments(currentUser, studentId));
+    }
+
+    /**
+     * Secure, anti-cheating endpoint for students to take an assessment.
+     * Strips all correct answer markers and explanations.
+     */
+    @GetMapping("/{id}/take")
+    public ResponseEntity<?> getAssessmentForTaking(@PathVariable UUID id) {
+        try {
+            return ResponseEntity.ok(assessmentService.getAssessmentForTaking(id));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage());
+        }
+    }
+
+    /**
+     * Server-side grading of student quiz submission.
+     */
+    @PostMapping("/{id}/submit")
+    public ResponseEntity<?> submitQuiz(
+            @PathVariable UUID id,
+            @RequestBody QuizDto.QuizSubmissionRequest request,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal lk.tutionlms.backend.identity.User currentUser) {
+        try {
+            QuizDto.QuizSubmissionResultResponse result = assessmentService.submitQuiz(id, request, currentUser);
+            return ResponseEntity.ok(result);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    /**
+     * Get a student's submission result and answer breakdown.
+     */
+    @GetMapping("/{id}/my-submission")
+    public ResponseEntity<?> getStudentSubmission(
+            @PathVariable UUID id,
+            @RequestParam(required = false) UUID studentId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal lk.tutionlms.backend.identity.User currentUser) {
+        try {
+            QuizDto.QuizSubmissionResultResponse result = assessmentService.getStudentSubmission(id, studentId, currentUser);
+            return ResponseEntity.ok(result);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage());
+        }
     }
 
     /**

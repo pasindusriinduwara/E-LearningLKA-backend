@@ -95,20 +95,26 @@ public class AssessmentService {
     }
 
     @Transactional(readOnly = true)
+    public List<QuizDto.AssessmentSummaryResponse> getAllAssessments() {
+        return assessmentRepository.findByDeletedFalseOrderByCreatedAtDesc()
+                .stream()
+                .map(this::mapToSummary)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<QuizDto.AssessmentSummaryResponse> getStudentAssessments() {
+        return assessmentRepository.findByDeletedFalseAndHiddenFalseOrderByCreatedAtDesc()
+                .stream()
+                .map(this::mapToSummary)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
     public List<QuizDto.AssessmentSummaryResponse> getAssessmentsByBatch(UUID batchId) {
         return assessmentRepository.findByBatchIdAndDeletedFalseOrderByCreatedAtDesc(batchId)
                 .stream()
-                .map(a -> QuizDto.AssessmentSummaryResponse.builder()
-                        .id(a.getId())
-                        .batchId(a.getBatchId())
-                        .title(a.getTitle())
-                        .assessmentType(a.getAssessmentType())
-                        .totalMarks(a.getTotalMarks())
-                        .dueDate(a.getDueDate())
-                        .durationMinutes(a.getDurationMinutes())
-                        .questionCount(a.getQuestions() != null ? a.getQuestions().size() : 0)
-                        .createdAt(a.getCreatedAt())
-                        .build())
+                .map(this::mapToSummary)
                 .collect(Collectors.toList());
     }
 
@@ -116,5 +122,78 @@ public class AssessmentService {
     public Assessment getAssessmentById(UUID id) {
         return assessmentRepository.findByIdWithQuestionsAndOptions(id)
                 .orElseThrow(() -> new IllegalArgumentException("Assessment not found with id: " + id));
+    }
+
+    @Transactional
+    public Assessment toggleHideAssessment(UUID id) {
+        Assessment a = assessmentRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Assessment not found with id: " + id));
+        a.setHidden(!a.isHidden());
+        return assessmentRepository.save(a);
+    }
+
+    @Transactional
+    public Assessment updateAssessment(UUID id, QuizDto.UpdateAssessmentRequest request) {
+        Assessment a = assessmentRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Assessment not found with id: " + id));
+
+        if (request.getTitle() != null && !request.getTitle().isBlank()) {
+            a.setTitle(request.getTitle().trim());
+        }
+        if (request.getTotalMarks() != null) {
+            a.setTotalMarks(request.getTotalMarks());
+        }
+        if (request.getDueDate() != null) {
+            a.setDueDate(request.getDueDate());
+        }
+        if (request.getDurationMinutes() != null) {
+            a.setDurationMinutes(request.getDurationMinutes());
+        }
+        if (request.getHidden() != null) {
+            a.setHidden(request.getHidden());
+        }
+
+        return assessmentRepository.save(a);
+    }
+
+    @Transactional
+    public void deleteAssessment(UUID id) {
+        Assessment a = assessmentRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Assessment not found with id: " + id));
+        a.setDeleted(true);
+        assessmentRepository.save(a);
+    }
+
+    private QuizDto.AssessmentSummaryResponse mapToSummary(Assessment a) {
+        String batchName = "All Batches";
+        if (a.getBatchId() != null) {
+            batchName = batchRepository.findById(a.getBatchId())
+                    .map(Batch::getName)
+                    .orElse("A/L Batch");
+        }
+
+        String status = "Open";
+        if (a.isHidden()) {
+            status = "Hidden";
+        } else if (a.getDueDate() != null && a.getDueDate().isBefore(java.time.LocalDateTime.now())) {
+            status = "Closed";
+        }
+
+        return QuizDto.AssessmentSummaryResponse.builder()
+                .id(a.getId())
+                .batchId(a.getBatchId())
+                .batchName(batchName)
+                .title(a.getTitle())
+                .assessmentType(a.getAssessmentType())
+                .totalMarks(a.getTotalMarks())
+                .dueDate(a.getDueDate())
+                .durationMinutes(a.getDurationMinutes())
+                .questionCount(a.getQuestions() != null ? a.getQuestions().size() : 0)
+                .status(status)
+                .hidden(a.isHidden())
+                .submissionsCount(0)
+                .totalStudents(32)
+                .createdAt(a.getCreatedAt())
+                .build();
     }
 }

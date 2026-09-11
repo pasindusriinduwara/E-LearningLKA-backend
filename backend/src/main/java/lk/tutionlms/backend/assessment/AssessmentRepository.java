@@ -14,6 +14,10 @@ public interface AssessmentRepository extends JpaRepository<Assessment, UUID> {
 
     List<Assessment> findByBatchIdAndDeletedFalseOrderByCreatedAtDesc(UUID batchId);
 
+    List<Assessment> findByDeletedFalseOrderByCreatedAtDesc();
+
+    List<Assessment> findByDeletedFalseAndHiddenFalseOrderByCreatedAtDesc();
+
     @Query("SELECT a FROM Assessment a LEFT JOIN FETCH a.questions q LEFT JOIN FETCH q.options WHERE a.id = :id AND a.deleted = false")
     Optional<Assessment> findByIdWithQuestionsAndOptions(@Param("id") UUID id);
 }

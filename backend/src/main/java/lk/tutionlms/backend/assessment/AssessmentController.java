@@ -71,6 +71,22 @@ public class AssessmentController {
     }
 
     /**
+     * Get all assessments.
+     */
+    @GetMapping
+    public ResponseEntity<List<QuizDto.AssessmentSummaryResponse>> getAllAssessments() {
+        return ResponseEntity.ok(assessmentService.getAllAssessments());
+    }
+
+    /**
+     * Get visible assessments for students (non-hidden, non-deleted).
+     */
+    @GetMapping("/student")
+    public ResponseEntity<List<QuizDto.AssessmentSummaryResponse>> getStudentAssessments() {
+        return ResponseEntity.ok(assessmentService.getStudentAssessments());
+    }
+
+    /**
      * Get all assessments for a batch.
      */
     @GetMapping("/batch/{batchId}")
@@ -85,6 +101,47 @@ public class AssessmentController {
     public ResponseEntity<?> getAssessmentById(@PathVariable UUID id) {
         try {
             return ResponseEntity.ok(assessmentService.getAssessmentById(id));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    /**
+     * Toggle hide/unhide visibility of an assessment for students.
+     */
+    @PatchMapping("/{id}/toggle-hide")
+    public ResponseEntity<?> toggleHide(@PathVariable UUID id) {
+        try {
+            Assessment updated = assessmentService.toggleHideAssessment(id);
+            return ResponseEntity.ok(updated);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    /**
+     * Update an assessment (title, due date, marks, duration).
+     */
+    @PutMapping("/{id}")
+    public ResponseEntity<?> updateAssessment(
+            @PathVariable UUID id,
+            @RequestBody QuizDto.UpdateAssessmentRequest request) {
+        try {
+            Assessment updated = assessmentService.updateAssessment(id, request);
+            return ResponseEntity.ok(updated);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    /**
+     * Soft delete an assessment.
+     */
+    @DeleteMapping("/{id}")
+    public ResponseEntity<?> deleteAssessment(@PathVariable UUID id) {
+        try {
+            assessmentService.deleteAssessment(id);
+            return ResponseEntity.noContent().build();
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         }

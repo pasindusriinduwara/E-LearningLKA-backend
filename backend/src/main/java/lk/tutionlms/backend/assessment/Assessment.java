@@ -40,6 +40,10 @@ public class Assessment extends BaseEntity {
     @Builder.Default
     private Integer durationMinutes = 60;
 
+    @Column(name = "is_hidden")
+    @Builder.Default
+    private boolean hidden = false;
+
     @OneToMany(mappedBy = "assessment", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("displayOrder ASC")
     @Builder.Default

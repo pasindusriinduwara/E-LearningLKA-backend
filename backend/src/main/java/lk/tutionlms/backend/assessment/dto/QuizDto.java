@@ -92,13 +92,30 @@ public class QuizDto {
     public static class AssessmentSummaryResponse {
         private UUID id;
         private UUID batchId;
+        private String batchName;
         private String title;
         private String assessmentType;
         private BigDecimal totalMarks;
         private LocalDateTime dueDate;
         private Integer durationMinutes;
         private int questionCount;
+        private String status;
+        private int submissionsCount;
+        private int totalStudents;
+        private boolean hidden;
         private LocalDateTime createdAt;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class UpdateAssessmentRequest {
+        private String title;
+        private BigDecimal totalMarks;
+        private LocalDateTime dueDate;
+        private Integer durationMinutes;
+        private Boolean hidden;
     }
 
     @Data

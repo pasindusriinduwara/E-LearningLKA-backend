@@ -23,14 +23,20 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/teacher")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('TEACHER')")
 public class TeacherController {
     private final TeacherService service;
     private final MaterialUploadService materialUploadService;
 
     @GetMapping("/profile")
-    public Teacher profile(@AuthenticationPrincipal User u) {
-        return service.teacher(u);
+    public ResponseEntity<TeacherProfileResponse> profile(@AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(service.getProfile(user));
+    }
+
+    @PutMapping("/profile")
+    public ResponseEntity<TeacherProfileResponse> updateProfile(
+            @AuthenticationPrincipal User user,
+            @Valid @RequestBody UpdateTeacherProfileRequest request) {
+        return ResponseEntity.ok(service.updateProfile(user, request));
     }
 
     @GetMapping("/dashboard")

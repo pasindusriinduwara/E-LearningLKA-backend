@@ -62,6 +62,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/subjects").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/subjects").hasRole("TEACHER")
 
+                        .requestMatchers("/api/v1/users/**").authenticated()
                         .requestMatchers("/api/v1/students/**").hasRole("STUDENT")
 
                         .requestMatchers(HttpMethod.POST, "/api/v1/enrollments/request")
@@ -82,6 +83,14 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/assessments/**").authenticated()
 
                         .requestMatchers("/api/v1/materials/**").authenticated()
+
+                        .requestMatchers(HttpMethod.GET, "/api/v1/schedules/**").permitAll()
+                        .requestMatchers("/api/v1/schedules/**").authenticated()
+
+                        .requestMatchers(HttpMethod.GET, "/api/v1/announcements/**").permitAll()
+                        .requestMatchers("/api/v1/announcements/**").authenticated()
+
+                        .requestMatchers("/api/v1/invoices/**").authenticated()
 
                         .anyRequest().authenticated())
                 .addFilterBefore(

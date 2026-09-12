@@ -6,6 +6,8 @@ import lk.tutionlms.backend.batch.BatchRepository;
 import lk.tutionlms.backend.identity.Student;
 import lk.tutionlms.backend.identity.StudentRepository;
 import lk.tutionlms.backend.identity.User;
+import lk.tutionlms.backend.enrollment.EnrollmentRepository;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,6 +29,7 @@ public class AssessmentService {
     private final BatchRepository batchRepository;
     private final SubmissionRepository submissionRepository;
     private final StudentRepository studentRepository;
+    private final EnrollmentRepository enrollmentRepository;
     private final Cloudinary cloudinary;
 
     public AssessmentService(
@@ -35,12 +38,14 @@ public class AssessmentService {
             BatchRepository batchRepository,
             SubmissionRepository submissionRepository,
             StudentRepository studentRepository,
+            EnrollmentRepository enrollmentRepository,
             Cloudinary cloudinary) {
         this.assessmentRepository = assessmentRepository;
         this.questionRepository = questionRepository;
         this.batchRepository = batchRepository;
         this.submissionRepository = submissionRepository;
         this.studentRepository = studentRepository;
+        this.enrollmentRepository = enrollmentRepository;
         this.cloudinary = cloudinary;
     }
 
@@ -132,13 +137,21 @@ public class AssessmentService {
             studentId = ensureDefaultStudentId();
         }
 
-        Map<UUID, Submission> studentSubmissions = new HashMap<>();
-        if (studentId != null) {
-            submissionRepository.findByStudentIdAndDeletedFalse(studentId)
-                    .forEach(s -> studentSubmissions.put(s.getAssessmentId(), s));
+        if (studentId == null) {
+            return Collections.emptyList();
         }
 
-        return assessmentRepository.findByDeletedFalseAndHiddenFalseOrderByCreatedAtDesc()
+        // Industrial Standard: Restrict resource discovery strictly to batches the student is actively enrolled in
+        List<UUID> activeBatchIds = enrollmentRepository.findActiveBatchIdsByStudentId(studentId);
+        if (activeBatchIds == null || activeBatchIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        Map<UUID, Submission> studentSubmissions = new HashMap<>();
+        submissionRepository.findByStudentIdAndDeletedFalse(studentId)
+                .forEach(s -> studentSubmissions.put(s.getAssessmentId(), s));
+
+        return assessmentRepository.findByBatchIdInAndDeletedFalseAndHiddenFalseOrderByCreatedAtDesc(activeBatchIds)
                 .stream()
                 .map(a -> {
                     QuizDto.AssessmentSummaryResponse summary = mapToSummary(a);
@@ -172,6 +185,54 @@ public class AssessmentService {
     }
 
     @Transactional(readOnly = true)
+    public List<QuizDto.AssessmentSummaryResponse> getStudentAssessmentsByBatch(
+            UUID batchId,
+            User currentUser,
+            String studentIdParam) {
+
+        UUID studentId = resolveStudentId(currentUser, studentIdParam);
+        if (studentId == null) {
+            studentId = ensureDefaultStudentId();
+        }
+
+        // Industrial Standard: Enforce active enrollment in this batch
+        if (studentId != null && !enrollmentRepository.isStudentActiveInBatch(studentId, batchId)) {
+            return Collections.emptyList();
+        }
+
+        Map<UUID, Submission> studentSubmissions = new HashMap<>();
+        if (studentId != null) {
+            submissionRepository.findByStudentIdAndDeletedFalse(studentId)
+                    .forEach(s -> studentSubmissions.put(s.getAssessmentId(), s));
+        }
+
+        return assessmentRepository.findByBatchIdAndDeletedFalseOrderByCreatedAtDesc(batchId)
+                .stream()
+                .filter(a -> !a.isHidden())
+                .map(a -> {
+                    QuizDto.AssessmentSummaryResponse summary = mapToSummary(a);
+                    if (studentSubmissions.containsKey(a.getId())) {
+                        Submission sub = studentSubmissions.get(a.getId());
+                        summary.setSubmitted(true);
+                        summary.setScoreObtained(sub.getScoreObtained());
+                        summary.setPaperUploadUrl(sub.getPaperUploadUrl());
+                        summary.setFeedback(sub.getFeedback());
+                        String subStatus = "GRADED".equalsIgnoreCase(sub.getStatus()) ? "Graded" : "Submitted";
+                        summary.setStatus(subStatus);
+                        if ("Graded".equals(subStatus) && sub.getScoreObtained() != null) {
+                            summary.setGrade(calculateGrade(sub.getScoreObtained(), a.getTotalMarks()));
+                        } else {
+                            summary.setGrade(null);
+                        }
+                    } else {
+                        summary.setSubmitted(false);
+                    }
+                    return summary;
+                })
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
     public Assessment getAssessmentById(UUID id) {
         Assessment assessment = assessmentRepository.findById(id)
                 .filter(a -> !a.isDeleted())
@@ -192,10 +253,31 @@ public class AssessmentService {
      */
     @Transactional(readOnly = true)
     public QuizDto.StudentQuizTakeResponse getAssessmentForTaking(UUID assessmentId) {
+        return getAssessmentForTaking(assessmentId, null, null);
+    }
+
+    /**
+     * Anti-cheating student quiz take endpoint:
+     * Delivers questions and options with zero correct answer flags.
+     * Enforces that student must be actively enrolled in the class/batch.
+     */
+    @Transactional(readOnly = true)
+    public QuizDto.StudentQuizTakeResponse getAssessmentForTaking(UUID assessmentId, User currentUser, String studentIdParam) {
         Assessment assessment = getAssessmentById(assessmentId);
 
         if (assessment.isHidden() || assessment.isDeleted()) {
             throw new IllegalArgumentException("Assessment is not currently available to students");
+        }
+
+        // Industrial Standard Guard: Verify student is actively enrolled in this assessment's batch
+        if (assessment.getBatchId() != null) {
+            UUID studentId = resolveStudentId(currentUser, studentIdParam);
+            if (studentId == null) {
+                studentId = ensureDefaultStudentId();
+            }
+            if (studentId == null || !enrollmentRepository.isStudentActiveInBatch(studentId, assessment.getBatchId())) {
+                throw new AccessDeniedException("Access denied: You are not enrolled in the class for this assessment.");
+            }
         }
 
         String batchName = "General Batch";
@@ -263,6 +345,13 @@ public class AssessmentService {
         UUID studentId = resolveStudentId(currentUser, request != null ? request.getStudentId() : null);
         if (studentId == null) {
             studentId = ensureDefaultStudentId();
+        }
+
+        // Industrial Standard Guard: Verify student is actively enrolled in this assessment's batch
+        if (assessment.getBatchId() != null) {
+            if (studentId == null || !enrollmentRepository.isStudentActiveInBatch(studentId, assessment.getBatchId())) {
+                throw new AccessDeniedException("Access denied: You are not enrolled in the class for this assessment.");
+            }
         }
 
         // Check if student already submitted - return existing graded submission
@@ -348,6 +437,13 @@ public class AssessmentService {
         UUID studentId = resolveStudentId(currentUser, studentIdParam);
         if (studentId == null) {
             studentId = ensureDefaultStudentId();
+        }
+
+        // Industrial Standard Guard: Verify student is actively enrolled in this assessment's batch
+        if (assessment.getBatchId() != null) {
+            if (studentId == null || !enrollmentRepository.isStudentActiveInBatch(studentId, assessment.getBatchId())) {
+                throw new AccessDeniedException("Access denied: You are not enrolled in the class for this assessment.");
+            }
         }
 
         Submission submission = submissionRepository.findByAssessmentAndStudentWithAnswers(assessmentId, studentId)
@@ -488,6 +584,13 @@ public class AssessmentService {
         UUID studentId = resolveStudentId(currentUser, request != null ? request.getStudentId() : null);
         if (studentId == null) {
             studentId = ensureDefaultStudentId();
+        }
+
+        // Industrial Standard Guard: Verify student is actively enrolled in this assessment's batch
+        if (assessment.getBatchId() != null) {
+            if (studentId == null || !enrollmentRepository.isStudentActiveInBatch(studentId, assessment.getBatchId())) {
+                throw new AccessDeniedException("Access denied: You are not enrolled in the class for this assessment.");
+            }
         }
 
         Optional<Submission> existing = submissionRepository.findByAssessmentAndStudentWithAnswers(assessmentId, studentId);

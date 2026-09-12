@@ -16,6 +16,12 @@ public interface EnrollmentRepository extends JpaRepository<Enrollment, UUID> {
             UUID batchId
     );
 
+    @Query("SELECT e.batchId FROM Enrollment e WHERE e.studentId = :studentId AND e.status = 'ACTIVE' AND e.deleted = false")
+    List<UUID> findActiveBatchIdsByStudentId(@Param("studentId") UUID studentId);
+
+    @Query("SELECT CASE WHEN COUNT(e) > 0 THEN true ELSE false END FROM Enrollment e WHERE e.studentId = :studentId AND e.batchId = :batchId AND e.status = 'ACTIVE' AND e.deleted = false")
+    boolean isStudentActiveInBatch(@Param("studentId") UUID studentId, @Param("batchId") UUID batchId);
+
     @Query(value = """
         SELECT
             s.id AS id,

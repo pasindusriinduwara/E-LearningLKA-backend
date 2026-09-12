@@ -10,7 +10,9 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import org.springframework.security.access.AccessDeniedException;
 
 @RestController
 @RequestMapping("/api/v1/assessments")
@@ -81,57 +83,82 @@ public class AssessmentController {
     /**
      * Get visible assessments for students (non-hidden, non-deleted).
      */
-     @GetMapping("/student")
-     public ResponseEntity<List<QuizDto.AssessmentSummaryResponse>> getStudentAssessments(
-             @RequestParam(required = false) String studentId,
-             @org.springframework.security.core.annotation.AuthenticationPrincipal lk.tutionlms.backend.identity.User currentUser) {
-         return ResponseEntity.ok(assessmentService.getStudentAssessments(currentUser, studentId));
-     }
+    @GetMapping("/student")
+    public ResponseEntity<List<QuizDto.AssessmentSummaryResponse>> getStudentAssessments(
+            @RequestParam(required = false) String studentId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal lk.tutionlms.backend.identity.User currentUser) {
+        return ResponseEntity.ok(assessmentService.getStudentAssessments(currentUser, studentId));
+    }
 
-     /**
-      * Secure, anti-cheating endpoint for students to take an assessment.
-      * Strips all correct answer markers and explanations.
-      */
-     @GetMapping("/{id}/take")
-     public ResponseEntity<?> getAssessmentForTaking(@PathVariable UUID id) {
-         try {
-             return ResponseEntity.ok(assessmentService.getAssessmentForTaking(id));
-         } catch (IllegalArgumentException e) {
-             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage());
-         }
-     }
+    /**
+     * Get assessments by batch (for teacher management or enrolled students).
+     */
+    @GetMapping("/batch/{batchId}")
+    public ResponseEntity<List<QuizDto.AssessmentSummaryResponse>> getAssessmentsByBatch(
+            @PathVariable UUID batchId,
+            @RequestParam(required = false) String studentId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal lk.tutionlms.backend.identity.User currentUser) {
+        if (currentUser != null && ("TEACHER".equalsIgnoreCase(currentUser.getUserType())
+                || "ADMIN".equalsIgnoreCase(currentUser.getUserType()))) {
+            return ResponseEntity.ok(assessmentService.getAssessmentsByBatch(batchId));
+        }
+        return ResponseEntity.ok(assessmentService.getStudentAssessmentsByBatch(batchId, currentUser, studentId));
+    }
 
-     /**
-      * Server-side grading of student quiz submission.
-      */
-     @PostMapping("/{id}/submit")
-     public ResponseEntity<?> submitQuiz(
-             @PathVariable UUID id,
-             @RequestBody QuizDto.QuizSubmissionRequest request,
-             @org.springframework.security.core.annotation.AuthenticationPrincipal lk.tutionlms.backend.identity.User currentUser) {
-         try {
-             QuizDto.QuizSubmissionResultResponse result = assessmentService.submitQuiz(id, request, currentUser);
-             return ResponseEntity.ok(result);
-         } catch (IllegalArgumentException e) {
-             return ResponseEntity.badRequest().body(e.getMessage());
-         }
-     }
+    /**
+     * Secure, anti-cheating endpoint for students to take an assessment.
+     * Strips all correct answer markers and explanations.
+     */
+    @GetMapping("/{id}/take")
+    public ResponseEntity<?> getAssessmentForTaking(
+            @PathVariable UUID id,
+            @RequestParam(required = false) String studentId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal lk.tutionlms.backend.identity.User currentUser) {
+        try {
+            return ResponseEntity.ok(assessmentService.getAssessmentForTaking(id, currentUser, studentId));
+        } catch (AccessDeniedException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", e.getMessage()));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", e.getMessage()));
+        }
+    }
 
-     /**
-      * Get a student's submission result and answer breakdown.
-      */
-     @GetMapping("/{id}/my-submission")
-     public ResponseEntity<?> getStudentSubmission(
-             @PathVariable UUID id,
-             @RequestParam(required = false) String studentId,
-             @org.springframework.security.core.annotation.AuthenticationPrincipal lk.tutionlms.backend.identity.User currentUser) {
-         try {
-             QuizDto.QuizSubmissionResultResponse result = assessmentService.getStudentSubmission(id, studentId, currentUser);
-             return ResponseEntity.ok(result);
-         } catch (IllegalArgumentException e) {
-             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage());
-         }
-     }
+    /**
+     * Server-side grading of student quiz submission.
+     */
+    @PostMapping("/{id}/submit")
+    public ResponseEntity<?> submitQuiz(
+            @PathVariable UUID id,
+            @RequestBody QuizDto.QuizSubmissionRequest request,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal lk.tutionlms.backend.identity.User currentUser) {
+        try {
+            QuizDto.QuizSubmissionResultResponse result = assessmentService.submitQuiz(id, request, currentUser);
+            return ResponseEntity.ok(result);
+        } catch (AccessDeniedException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", e.getMessage()));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+
+    /**
+     * Get a student's submission result and answer breakdown.
+     */
+    @GetMapping("/{id}/my-submission")
+    public ResponseEntity<?> getStudentSubmission(
+            @PathVariable UUID id,
+            @RequestParam(required = false) String studentId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal lk.tutionlms.backend.identity.User currentUser) {
+        try {
+            QuizDto.QuizSubmissionResultResponse result = assessmentService.getStudentSubmission(id, studentId,
+                    currentUser);
+            return ResponseEntity.ok(result);
+        } catch (AccessDeniedException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", e.getMessage()));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", e.getMessage()));
+        }
+    }
 
     /**
      * Submit an essay-type or paper assignment.
@@ -144,8 +171,10 @@ public class AssessmentController {
         try {
             QuizDto.QuizSubmissionResultResponse result = assessmentService.submitEssay(id, request, currentUser);
             return ResponseEntity.ok(result);
+        } catch (AccessDeniedException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", e.getMessage()));
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
         }
     }
 
@@ -183,13 +212,18 @@ public class AssessmentController {
     @GetMapping("/files/{filename}")
     public ResponseEntity<org.springframework.core.io.Resource> serveFile(@PathVariable String filename) {
         try {
-            java.nio.file.Path filePath = java.nio.file.Paths.get("uploads", "assessments").resolve(filename).normalize();
-            org.springframework.core.io.Resource resource = new org.springframework.core.io.UrlResource(filePath.toUri());
+            java.nio.file.Path filePath = java.nio.file.Paths.get("uploads", "assessments").resolve(filename)
+                    .normalize();
+            org.springframework.core.io.Resource resource = new org.springframework.core.io.UrlResource(
+                    filePath.toUri());
             if (resource.exists() && resource.isReadable()) {
                 String contentType = "application/octet-stream";
-                if (filename.endsWith(".pdf")) contentType = "application/pdf";
-                else if (filename.endsWith(".png")) contentType = "image/png";
-                else if (filename.endsWith(".jpg") || filename.endsWith(".jpeg")) contentType = "image/jpeg";
+                if (filename.endsWith(".pdf"))
+                    contentType = "application/pdf";
+                else if (filename.endsWith(".png"))
+                    contentType = "image/png";
+                else if (filename.endsWith(".jpg") || filename.endsWith(".jpeg"))
+                    contentType = "image/jpeg";
                 return ResponseEntity.ok()
                         .header(org.springframework.http.HttpHeaders.CONTENT_TYPE, contentType)
                         .body(resource);
@@ -211,14 +245,6 @@ public class AssessmentController {
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage());
         }
-    }
-
-    /**
-     * Get all assessments for a batch.
-     */
-    @GetMapping("/batch/{batchId}")
-    public ResponseEntity<List<QuizDto.AssessmentSummaryResponse>> getAssessmentsByBatch(@PathVariable UUID batchId) {
-        return ResponseEntity.ok(assessmentService.getAssessmentsByBatch(batchId));
     }
 
     /**

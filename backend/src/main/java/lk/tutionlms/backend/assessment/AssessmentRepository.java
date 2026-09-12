@@ -18,4 +18,7 @@ public interface AssessmentRepository extends JpaRepository<Assessment, UUID> {
 
     @Query("SELECT a FROM Assessment a WHERE a.deleted = false AND (a.hidden IS NULL OR a.hidden = false) ORDER BY a.createdAt DESC")
     List<Assessment> findByDeletedFalseAndHiddenFalseOrderByCreatedAtDesc();
+
+    @Query("SELECT a FROM Assessment a WHERE a.deleted = false AND (a.hidden IS NULL OR a.hidden = false) AND a.batchId IN :batchIds ORDER BY a.createdAt DESC")
+    List<Assessment> findByBatchIdInAndDeletedFalseAndHiddenFalseOrderByCreatedAtDesc(@Param("batchIds") List<UUID> batchIds);
 }

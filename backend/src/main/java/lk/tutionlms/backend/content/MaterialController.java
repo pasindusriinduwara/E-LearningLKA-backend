@@ -18,19 +18,19 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class MaterialController {
 
-    private final MaterialRepository materialRepository;
+    private final MaterialService materialService;
 
     @GetMapping("/recent")
     @PreAuthorize("hasRole('STUDENT')")
-    public ResponseEntity<List<LearningMaterial>> getRecentMaterials(@AuthenticationPrincipal User user) {
-        return ResponseEntity.ok(materialRepository.findByStudentUserId(user.getId()));
+    public ResponseEntity<List<MaterialResponse>> getRecentMaterials(@AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(materialService.getStudentRecentMaterials(user));
     }
 
     @GetMapping("/batch/{batchId}")
     @PreAuthorize("hasRole('STUDENT')")
-    public ResponseEntity<List<LearningMaterial>> getBatchMaterials(
+    public ResponseEntity<List<MaterialResponse>> getBatchMaterials(
             @AuthenticationPrincipal User user,
             @PathVariable UUID batchId) {
-        return ResponseEntity.ok(materialRepository.findByBatchIdAndStudentUserId(batchId, user.getId()));
+        return ResponseEntity.ok(materialService.getStudentBatchMaterials(user, batchId));
     }
 }

@@ -1,7 +1,10 @@
 package lk.tutionlms.backend.config;
 
+import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -20,6 +23,9 @@ import lk.tutionlms.backend.security.JwtAuthenticationFilter;
 @Configuration
 @EnableMethodSecurity
 public class SecurityConfig {
+
+    @Value("${application.cors.allowed-origins:http://localhost:3000}")
+    private String allowedOrigins;
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final AuthenticationProvider authenticationProvider;
@@ -72,15 +78,10 @@ public class SecurityConfig {
 
                         .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/teacher/batches/**").hasRole("TEACHER")
 
-                        .requestMatchers(HttpMethod.POST, "/api/v1/enrollments/request").hasRole("STUDENT")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/assessments").hasRole("TEACHER")
+                        .requestMatchers("/api/v1/assessments/**").authenticated()
 
-                        .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/my-status").hasRole("STUDENT")
-
-                        .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/teacher/batches/**").hasRole("TEACHER")
-
-                        .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/pending").hasRole("TEACHER")
-
-                        .requestMatchers(HttpMethod.PUT, "/api/v1/enrollments/*/approve").hasRole("TEACHER")
+                        .requestMatchers("/api/v1/materials/**").authenticated()
 
                         .anyRequest().authenticated())
                 .addFilterBefore(
@@ -95,14 +96,21 @@ public class SecurityConfig {
 
         CorsConfiguration configuration = new CorsConfiguration();
 
-        configuration.setAllowedOrigins(
-                List.of("http://localhost:3000"));
+        List<String> origins = Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toList());
+
+        configuration.setAllowedOrigins(origins);
 
         configuration.setAllowedMethods(
-                List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+                List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
 
         configuration.setAllowedHeaders(
-                List.of("Authorization", "Content-Type", "Accept"));
+                List.of("Authorization", "Content-Type", "Accept", "X-Requested-With", "Origin"));
+
+        configuration.setExposedHeaders(
+                List.of("Authorization"));
 
         configuration.setAllowCredentials(true);
 

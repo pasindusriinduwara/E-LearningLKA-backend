@@ -1,0 +1,15 @@
+# Secrets and environment variables
+.env
+.env.*
+!.env.example
+
+# Build artifacts and dependencies
+target/
+*.class
+
+# IDE and OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db

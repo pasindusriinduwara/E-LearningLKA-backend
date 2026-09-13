@@ -5,24 +5,23 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDate;
+import java.util.UUID;
+
 @Data
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
-public class UserProfileResponse {
-    private String id;
-    private String userId;
-    private String email;
-    private String role;
+public class StudentProfileResponse {
+    private UUID id;
+    private UUID userId;
+    private String studentId;
     private String name;
     private String initials;
-    private String title;
-    private String studentId;
+    private String email;
+    private String phoneNumber;
     private String exam;
     private String stream;
     private String medium;
-    private String phoneNumber;
-    private String dateOfBirth;
-    private String qualification;
-    private String bio;
+    private LocalDate dateOfBirth;
 }

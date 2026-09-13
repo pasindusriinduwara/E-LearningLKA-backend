@@ -51,11 +51,10 @@ public class SecurityConfig {
                         .requestMatchers("/error").permitAll()
                         .requestMatchers("/auth/**").permitAll()
                         .requestMatchers("/api/v1/auth/**").permitAll()
-                        .requestMatchers("/api/v1/assessments", "/api/v1/assessments/**").permitAll()
 
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
-                        .requestMatchers(HttpMethod.GET, "/api/v1/batches").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/batches/**").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/batches").hasRole("TEACHER")
 
                         .requestMatchers("/api/v1/teacher/**").hasRole("TEACHER")
@@ -63,9 +62,14 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/subjects").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/subjects").hasRole("TEACHER")
 
+                        .requestMatchers("/api/v1/users/**").authenticated()
                         .requestMatchers("/api/v1/students/**").hasRole("STUDENT")
 
                         .requestMatchers(HttpMethod.POST, "/api/v1/enrollments/request")
+                        .hasRole("STUDENT")
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/enrollments/request/**")
+                        .hasRole("STUDENT")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/enrollments/batches/*/leave")
                         .hasRole("STUDENT")
 
                         .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/my-status")
@@ -79,15 +83,18 @@ public class SecurityConfig {
 
                         .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/teacher/batches/**").hasRole("TEACHER")
 
-                        .requestMatchers(HttpMethod.POST, "/api/v1/enrollments/request").hasRole("STUDENT")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/assessments").hasRole("TEACHER")
+                        .requestMatchers("/api/v1/assessments/**").authenticated()
 
-                        .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/my-status").hasRole("STUDENT")
+                        .requestMatchers("/api/v1/materials/**").authenticated()
 
-                        .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/teacher/batches/**").hasRole("TEACHER")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/schedules/**").permitAll()
+                        .requestMatchers("/api/v1/schedules/**").authenticated()
 
-                        .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/pending").hasRole("TEACHER")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/announcements/**").permitAll()
+                        .requestMatchers("/api/v1/announcements/**").authenticated()
 
-                        .requestMatchers(HttpMethod.PUT, "/api/v1/enrollments/*/approve").hasRole("TEACHER")
+                        .requestMatchers("/api/v1/invoices/**").authenticated()
 
                         .anyRequest().authenticated())
                 .addFilterBefore(

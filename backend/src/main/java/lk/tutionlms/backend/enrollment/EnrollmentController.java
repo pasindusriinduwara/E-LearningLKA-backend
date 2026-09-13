@@ -77,6 +77,25 @@ public class EnrollmentController {
         );
     }
 
+    @PostMapping("/batches/{batchId}/leave")
+    @PreAuthorize("hasRole('STUDENT')")
+    public ResponseEntity<Map<String, String>> leaveClass(
+            @PathVariable String batchId,
+            Authentication authentication
+    ) {
+        enrollmentService.leaveClass(
+                authentication.getName(),
+                batchId
+        );
+
+        return ResponseEntity.ok(
+                Map.of(
+                        "message",
+                        "Successfully left the class"
+                )
+        );
+    }
+
     @GetMapping("/teacher/batches/{batchId}")
     @PreAuthorize("hasRole('TEACHER')")
     public ResponseEntity<List<BatchEnrollmentResponse>>

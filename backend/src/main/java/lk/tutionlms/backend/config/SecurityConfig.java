@@ -69,6 +69,8 @@ public class SecurityConfig {
                         .hasRole("STUDENT")
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/enrollments/request/**")
                         .hasRole("STUDENT")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/enrollments/batches/*/leave")
+                        .hasRole("STUDENT")
 
                         .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/my-status")
                         .hasRole("STUDENT")

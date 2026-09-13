@@ -13,6 +13,8 @@ public interface AnnouncementRepository extends JpaRepository<Announcement, UUID
 
     List<Announcement> findByBatchIdAndDeletedFalseOrderByCreatedAtDesc(UUID batchId);
 
+    List<Announcement> findByBatchIdInAndDeletedFalseOrderByCreatedAtDesc(List<UUID> batchIds);
+
     @Query("select a from Announcement a where a.deleted = false and (a.batchId in (select b.id from lk.tutionlms.backend.batch.Batch b where b.teacherId = :teacherId) or a.batchId is null)")
     List<Announcement> findByTeacherId(@Param("teacherId") UUID teacherId);
 

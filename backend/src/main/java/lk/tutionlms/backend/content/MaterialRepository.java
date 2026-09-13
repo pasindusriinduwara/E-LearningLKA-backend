@@ -16,6 +16,8 @@ public interface MaterialRepository extends JpaRepository<LearningMaterial, UUID
 
     List<LearningMaterial> findByBatchIdAndDeletedFalseOrderByCreatedAtDesc(UUID batchId);
 
+    List<LearningMaterial> findByBatchIdInAndDeletedFalseOrderByCreatedAtDesc(List<UUID> batchIds);
+
     @Query("select m from LearningMaterial m where m.deleted = false and m.batchId in (select b.id from lk.tutionlms.backend.batch.Batch b where b.teacherId = :teacherId and b.deleted = false) order by m.createdAt desc")
     List<LearningMaterial> findByTeacherId(@Param("teacherId") UUID teacherId);
 

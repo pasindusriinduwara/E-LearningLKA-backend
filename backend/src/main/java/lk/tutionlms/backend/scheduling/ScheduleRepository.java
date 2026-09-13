@@ -17,6 +17,8 @@ public interface ScheduleRepository extends JpaRepository<ScheduleItem, UUID> {
 
     List<ScheduleItem> findByBatchIdAndDeletedFalse(UUID batchId);
 
+    List<ScheduleItem> findByBatchIdInAndDeletedFalse(List<UUID> batchIds);
+
     @Query("SELECT s FROM ScheduleItem s WHERE s.deleted = false AND s.batchId IN " +
             "(SELECT b.id FROM lk.tutionlms.backend.batch.Batch b WHERE b.teacherId = :teacherId AND b.deleted = false)")
     List<ScheduleItem> findByTeacherId(@Param("teacherId") UUID teacherId);

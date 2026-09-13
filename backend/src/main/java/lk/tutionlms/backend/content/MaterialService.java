@@ -4,9 +4,13 @@ import lk.tutionlms.backend.academic.Subject;
 import lk.tutionlms.backend.academic.SubjectRepository;
 import lk.tutionlms.backend.batch.Batch;
 import lk.tutionlms.backend.batch.BatchRepository;
+import lk.tutionlms.backend.enrollment.EnrollmentRepository;
+import lk.tutionlms.backend.identity.Student;
+import lk.tutionlms.backend.identity.StudentRepository;
 import lk.tutionlms.backend.identity.Teacher;
 import lk.tutionlms.backend.identity.TeacherRepository;
 import lk.tutionlms.backend.identity.User;
+import lk.tutionlms.backend.identity.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,17 +27,78 @@ public class MaterialService {
     private final BatchRepository batchRepository;
     private final TeacherRepository teacherRepository;
     private final SubjectRepository subjectRepository;
+    private final UserRepository userRepository;
+    private final StudentRepository studentRepository;
+    private final EnrollmentRepository enrollmentRepository;
+
+    @Transactional(readOnly = true)
+    public List<MaterialResponse> getStudentRecentMaterials(String userEmail) {
+        if (userEmail == null || userEmail.isBlank()) {
+            return Collections.emptyList();
+        }
+
+        User user = userRepository.findByEmail(userEmail).orElse(null);
+        if (user == null) {
+            return Collections.emptyList();
+        }
+
+        Student student = studentRepository.findByUserId(user.getId()).orElse(null);
+        if (student == null) {
+            return Collections.emptyList();
+        }
+
+        List<UUID> activeBatchIds = enrollmentRepository.findActiveBatchIdsByStudentId(student.getId());
+        if (activeBatchIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<LearningMaterial> materials = materialRepository
+                .findByBatchIdInAndDeletedFalseOrderByCreatedAtDesc(activeBatchIds);
+
+        return enrichMaterials(materials);
+    }
 
     @Transactional(readOnly = true)
     public List<MaterialResponse> getStudentRecentMaterials(User user) {
-        List<LearningMaterial> materials = materialRepository.findByStudentUserId(user.getId());
+        if (user == null) {
+            return Collections.emptyList();
+        }
+        return getStudentRecentMaterials(user.getEmail());
+    }
+
+    @Transactional(readOnly = true)
+    public List<MaterialResponse> getStudentBatchMaterials(String userEmail, UUID batchId) {
+        if (userEmail == null || userEmail.isBlank() || batchId == null) {
+            return Collections.emptyList();
+        }
+
+        User user = userRepository.findByEmail(userEmail).orElse(null);
+        if (user == null) {
+            return Collections.emptyList();
+        }
+
+        Student student = studentRepository.findByUserId(user.getId()).orElse(null);
+        if (student == null) {
+            return Collections.emptyList();
+        }
+
+        boolean isActive = enrollmentRepository.isStudentActiveInBatch(student.getId(), batchId);
+        if (!isActive) {
+            return Collections.emptyList();
+        }
+
+        List<LearningMaterial> materials = materialRepository
+                .findByBatchIdAndDeletedFalseOrderByCreatedAtDesc(batchId);
+
         return enrichMaterials(materials);
     }
 
     @Transactional(readOnly = true)
     public List<MaterialResponse> getStudentBatchMaterials(User user, UUID batchId) {
-        List<LearningMaterial> materials = materialRepository.findByBatchIdAndStudentUserId(batchId, user.getId());
-        return enrichMaterials(materials);
+        if (user == null) {
+            return Collections.emptyList();
+        }
+        return getStudentBatchMaterials(user.getEmail(), batchId);
     }
 
     private List<MaterialResponse> enrichMaterials(List<LearningMaterial> materials) {

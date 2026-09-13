@@ -58,6 +58,25 @@ public class EnrollmentController {
         );
     }
 
+    @DeleteMapping("/request/{batchId}")
+    @PreAuthorize("hasRole('STUDENT')")
+    public ResponseEntity<Map<String, String>> cancelEnrollment(
+            @PathVariable String batchId,
+            Authentication authentication
+    ) {
+        enrollmentService.cancelRequest(
+                authentication.getName(),
+                batchId
+        );
+
+        return ResponseEntity.ok(
+                Map.of(
+                        "message",
+                        "Enrollment request cancelled successfully"
+                )
+        );
+    }
+
     @GetMapping("/teacher/batches/{batchId}")
     @PreAuthorize("hasRole('TEACHER')")
     public ResponseEntity<List<BatchEnrollmentResponse>>

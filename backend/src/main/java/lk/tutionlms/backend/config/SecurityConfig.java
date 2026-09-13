@@ -54,7 +54,7 @@ public class SecurityConfig {
 
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
-                        .requestMatchers(HttpMethod.GET, "/api/v1/batches").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/batches/**").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/batches").hasRole("TEACHER")
 
                         .requestMatchers("/api/v1/teacher/**").hasRole("TEACHER")
@@ -66,6 +66,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/students/**").hasRole("STUDENT")
 
                         .requestMatchers(HttpMethod.POST, "/api/v1/enrollments/request")
+                        .hasRole("STUDENT")
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/enrollments/request/**")
                         .hasRole("STUDENT")
 
                         .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/my-status")

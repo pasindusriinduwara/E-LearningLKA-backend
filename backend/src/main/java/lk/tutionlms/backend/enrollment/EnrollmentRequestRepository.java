@@ -15,6 +15,11 @@ public interface EnrollmentRequestRepository
             UUID batchId
     );
 
+    java.util.Optional<EnrollmentRequest> findTopByStudentIdAndBatchIdAndIsDeletedFalseOrderByCreatedAtDesc(
+            UUID studentId,
+            UUID batchId
+    );
+
     List<EnrollmentRequest> findByStudentIdAndIsDeletedFalse(
             UUID studentId
     );

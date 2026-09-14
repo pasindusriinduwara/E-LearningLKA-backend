@@ -7,12 +7,12 @@ import lk.tutionlms.backend.identity.Student;
 import lk.tutionlms.backend.identity.StudentRepository;
 import lk.tutionlms.backend.identity.User;
 import lk.tutionlms.backend.enrollment.EnrollmentRepository;
+import com.cloudinary.Cloudinary;
+import com.cloudinary.utils.ObjectUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import com.cloudinary.Cloudinary;
-import com.cloudinary.utils.ObjectUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
@@ -32,6 +32,7 @@ public class AssessmentService {
     private final EnrollmentRepository enrollmentRepository;
     private final Cloudinary cloudinary;
 
+    @Autowired
     public AssessmentService(
             AssessmentRepository assessmentRepository,
             QuestionRepository questionRepository,
@@ -39,7 +40,7 @@ public class AssessmentService {
             SubmissionRepository submissionRepository,
             StudentRepository studentRepository,
             EnrollmentRepository enrollmentRepository,
-            Cloudinary cloudinary) {
+            @Autowired(required = false) Cloudinary cloudinary) {
         this.assessmentRepository = assessmentRepository;
         this.questionRepository = questionRepository;
         this.batchRepository = batchRepository;

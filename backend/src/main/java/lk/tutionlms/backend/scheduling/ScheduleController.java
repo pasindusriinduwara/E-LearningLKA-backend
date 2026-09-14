@@ -1,9 +1,16 @@
 package lk.tutionlms.backend.scheduling;
 
+import lk.tutionlms.backend.enrollment.EnrollmentRepository;
+import lk.tutionlms.backend.identity.Student;
+import lk.tutionlms.backend.identity.StudentRepository;
+import lk.tutionlms.backend.identity.User;
+import lk.tutionlms.backend.identity.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -13,6 +20,9 @@ import java.util.UUID;
 public class ScheduleController {
 
     private final ScheduleRepository scheduleRepository;
+    private final UserRepository userRepository;
+    private final StudentRepository studentRepository;
+    private final EnrollmentRepository enrollmentRepository;
 
     @GetMapping
     public ResponseEntity<List<ScheduleItem>> getAllSchedules() {
@@ -20,7 +30,20 @@ public class ScheduleController {
     }
 
     @GetMapping("/upcoming")
-    public ResponseEntity<List<ScheduleItem>> getUpcomingSchedules() {
+    public ResponseEntity<List<ScheduleItem>> getUpcomingSchedules(Authentication authentication) {
+        if (authentication != null && authentication.isAuthenticated()) {
+            User user = userRepository.findByEmail(authentication.getName()).orElse(null);
+            if (user != null) {
+                Student student = studentRepository.findByUserId(user.getId()).orElse(null);
+                if (student != null) {
+                    List<UUID> activeBatchIds = enrollmentRepository.findActiveBatchIdsByStudentId(student.getId());
+                    if (activeBatchIds.isEmpty()) {
+                        return ResponseEntity.ok(Collections.emptyList());
+                    }
+                    return ResponseEntity.ok(scheduleRepository.findByBatchIdInAndDeletedFalse(activeBatchIds));
+                }
+            }
+        }
         return ResponseEntity.ok(scheduleRepository.findByDeletedFalse());
     }
 

@@ -26,6 +26,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class TeacherService {
     private final TeacherRepository teacherRepository;
+    private final UserRepository userRepository;
     private final BatchRepository batchRepository;
     private final EnrollmentRepository enrollmentRepository;
     private final ScheduleRepository scheduleRepository;
@@ -35,6 +36,56 @@ public class TeacherService {
     public Teacher teacher(User user) {
         return teacherRepository.findByUserId(user.getId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Teacher profile not found"));
+    }
+
+    public TeacherProfileResponse getProfile(User user) {
+        Teacher teacher = teacher(user);
+        return toProfileResponse(teacher, user);
+    }
+
+    @Transactional
+    public TeacherProfileResponse updateProfile(User user, UpdateTeacherProfileRequest request) {
+        Teacher teacher = teacher(user);
+
+        if (request.getTitle() != null && !request.getTitle().isBlank()) {
+            teacher.setTitle(request.getTitle().trim());
+        }
+        teacher.setName(request.getName().trim());
+        teacher.setQualification(request.getQualification());
+        teacher.setBio(request.getBio());
+        teacherRepository.save(teacher);
+
+        if (request.getPhoneNumber() != null) {
+            user = userRepository.findById(user.getId()).map(u -> {
+                u.setPhoneNumber(request.getPhoneNumber().trim());
+                return userRepository.save(u);
+            }).orElse(user);
+        }
+
+        return toProfileResponse(teacher, user);
+    }
+
+    private TeacherProfileResponse toProfileResponse(Teacher teacher, User user) {
+        return TeacherProfileResponse.builder()
+                .id(teacher.getId())
+                .userId(teacher.getUserId())
+                .title(teacher.getTitle())
+                .name(teacher.getName())
+                .initials(generateInitials(teacher.getName()))
+                .qualification(teacher.getQualification())
+                .bio(teacher.getBio())
+                .email(user != null ? user.getEmail() : null)
+                .phoneNumber(user != null ? user.getPhoneNumber() : null)
+                .build();
+    }
+
+    private String generateInitials(String name) {
+        if (name == null || name.isBlank()) return "TC";
+        String[] parts = name.trim().split("\\s+");
+        if (parts.length == 1) {
+            return parts[0].substring(0, Math.min(2, parts[0].length())).toUpperCase();
+        }
+        return (parts[0].substring(0, 1) + parts[parts.length - 1].substring(0, 1)).toUpperCase();
     }
 
     public List<Batch> batches(User user) {

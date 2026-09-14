@@ -28,9 +28,21 @@ public class BatchController {
     }
 
     @GetMapping
-    public ResponseEntity<List<AvailableBatchResponse>> getAvailableBatches() {
+    public ResponseEntity<List<AvailableBatchResponse>> getAvailableBatches(Authentication authentication) {
+        String userEmail = authentication != null ? authentication.getName() : null;
         return ResponseEntity.ok(
-                batchService.getAvailableBatches()
+                batchService.getAvailableBatches(userEmail)
+        );
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<AvailableBatchResponse> getBatchById(
+            @PathVariable java.util.UUID id,
+            Authentication authentication
+    ) {
+        String userEmail = authentication != null ? authentication.getName() : null;
+        return ResponseEntity.ok(
+                batchService.getBatchById(id, userEmail)
         );
     }
 }

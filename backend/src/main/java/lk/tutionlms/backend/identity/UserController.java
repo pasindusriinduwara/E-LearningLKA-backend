@@ -21,6 +21,7 @@ public class UserController {
         UserProfileResponse.UserProfileResponseBuilder builder = UserProfileResponse.builder()
                 .userId(user.getId().toString())
                 .email(user.getEmail())
+                .phoneNumber(user.getPhoneNumber())
                 .role(user.getUserType());
 
         if ("STUDENT".equalsIgnoreCase(user.getUserType())) {
@@ -31,7 +32,8 @@ public class UserController {
                         .studentId(student.getStudentId())
                         .exam(student.getExam())
                         .stream(student.getStream())
-                        .medium(student.getMedium());
+                        .medium(student.getMedium())
+                        .dateOfBirth(student.getDateOfBirth() != null ? student.getDateOfBirth().toString() : null);
             });
         } else if ("TEACHER".equalsIgnoreCase(user.getUserType())) {
             teacherRepository.findByUserId(user.getId()).ifPresent(teacher -> {

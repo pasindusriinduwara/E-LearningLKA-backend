@@ -72,17 +72,28 @@ public class EnrollmentService {
 
         UUID studentUuid = student.getId();
 
-        boolean alreadyRequested =
-                enrollmentRequestRepository
-                        .existsByStudentIdAndBatchId(
-                                studentUuid,
-                                batchUuid
-                        );
+        boolean isAlreadyActive = enrollmentRepository.isStudentActiveInBatch(studentUuid, batchUuid);
+        if (isAlreadyActive) {
+            throw new IllegalStateException("You are already enrolled in this class");
+        }
 
-        if (alreadyRequested) {
-            throw new IllegalStateException(
-                    "Enrollment request already exists for this batch"
-            );
+        var existingRequestOpt = enrollmentRequestRepository
+                .findTopByStudentIdAndBatchIdAndIsDeletedFalseOrderByCreatedAtDesc(studentUuid, batchUuid);
+
+        if (existingRequestOpt.isPresent()) {
+            EnrollmentRequest existing = existingRequestOpt.get();
+            if (existing.getStatus() == EnrollmentStatus.PENDING) {
+                throw new IllegalStateException("Enrollment request is already pending review");
+            }
+            if (existing.getStatus() == EnrollmentStatus.APPROVED) {
+                throw new IllegalStateException("You are already enrolled in this class");
+            }
+            if (existing.getStatus() == EnrollmentStatus.REJECTED) {
+                existing.setStatus(EnrollmentStatus.PENDING);
+                existing.setUpdatedAt(java.time.LocalDateTime.now());
+                enrollmentRequestRepository.save(existing);
+                return;
+            }
         }
 
         EnrollmentRequest request = new EnrollmentRequest();
@@ -91,6 +102,81 @@ public class EnrollmentService {
         request.setStatus(EnrollmentStatus.PENDING);
 
         enrollmentRequestRepository.save(request);
+    }
+
+    @Transactional
+    public void cancelRequest(String studentEmail, String batchId) {
+        if (batchId == null || batchId.isBlank()) {
+            throw new IllegalArgumentException("Batch ID is required");
+        }
+
+        User user = userRepository.findByEmail(studentEmail)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        Student student = studentRepository.findByUserId(user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("Student profile not found"));
+
+        UUID batchUuid;
+        try {
+            batchUuid = UUID.fromString(batchId);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid batch ID format");
+        }
+
+        EnrollmentRequest request = enrollmentRequestRepository
+                .findTopByStudentIdAndBatchIdAndIsDeletedFalseOrderByCreatedAtDesc(student.getId(), batchUuid)
+                .orElseThrow(() -> new IllegalArgumentException("No enrollment request found for this batch"));
+
+        if (request.getStatus() != EnrollmentStatus.PENDING) {
+            throw new IllegalStateException("Only pending enrollment requests can be cancelled");
+        }
+
+        request.setDeleted(true);
+        enrollmentRequestRepository.delete(request);
+    }
+
+    @Transactional
+    public void leaveClass(String studentEmail, String batchId) {
+        if (batchId == null || batchId.isBlank()) {
+            throw new IllegalArgumentException("Batch ID is required");
+        }
+
+        User user = userRepository.findByEmail(studentEmail)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        Student student = studentRepository.findByUserId(user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("Student profile not found"));
+
+        UUID batchUuid;
+        try {
+            batchUuid = UUID.fromString(batchId);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid batch ID format");
+        }
+
+        List<Enrollment> enrollments = enrollmentRepository
+                .findByStudentIdAndBatchIdAndDeletedFalse(student.getId(), batchUuid);
+
+        if (enrollments.isEmpty()) {
+            throw new IllegalStateException("You are not currently enrolled in this class");
+        }
+
+        for (Enrollment enrollment : enrollments) {
+            enrollment.setStatus("DROPPED");
+            enrollment.setDeleted(true);
+            enrollmentRepository.save(enrollment);
+        }
+
+        List<EnrollmentRequest> requests = enrollmentRequestRepository
+                .findByStudentIdAndIsDeletedFalse(student.getId())
+                .stream()
+                .filter(r -> r.getBatchId().equals(batchUuid))
+                .toList();
+
+        for (EnrollmentRequest req : requests) {
+            req.setDeleted(true);
+            enrollmentRequestRepository.delete(req);
+        }
     }
 
     @Transactional(readOnly = true)
@@ -125,14 +211,22 @@ public class EnrollmentService {
         request.setStatus(EnrollmentStatus.APPROVED);
         enrollmentRequestRepository.save(request);
 
-        enrollmentRepository.save(
-                Enrollment.builder()
-                        .studentId(request.getStudentId())
-                        .batchId(request.getBatchId())
-                        .enrolledDate(LocalDate.now())
-                        .status("ACTIVE")
-                        .build()
-        );
+        List<Enrollment> activeEnrollments =
+                enrollmentRepository.findByStudentIdAndBatchIdAndDeletedFalse(
+                        request.getStudentId(),
+                        request.getBatchId()
+                );
+
+        if (activeEnrollments.isEmpty()) {
+            enrollmentRepository.save(
+                    Enrollment.builder()
+                            .studentId(request.getStudentId())
+                            .batchId(request.getBatchId())
+                            .enrolledDate(LocalDate.now())
+                            .status("ACTIVE")
+                            .build()
+            );
+        }
     }
     @Transactional(readOnly = true)
 public List<BatchEnrollmentResponse> getBatchEnrollments(
@@ -200,13 +294,13 @@ public void approveRequest(
     request.setStatus(EnrollmentStatus.APPROVED);
     enrollmentRequestRepository.save(request);
 
-    boolean alreadyEnrolled =
-            enrollmentRepository.existsByStudentIdAndBatchId(
+    List<Enrollment> activeEnrollments =
+            enrollmentRepository.findByStudentIdAndBatchIdAndDeletedFalse(
                     request.getStudentId(),
                     request.getBatchId()
             );
 
-    if (!alreadyEnrolled) {
+    if (activeEnrollments.isEmpty()) {
         enrollmentRepository.save(
                 Enrollment.builder()
                         .studentId(request.getStudentId())

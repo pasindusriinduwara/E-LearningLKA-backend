@@ -15,8 +15,7 @@ CREATE TABLE IF NOT EXISTS public.users
     status character varying(20) COLLATE pg_catalog."default" NOT NULL DEFAULT 'ACTIVE'::character varying,
     user_type character varying(30) COLLATE pg_catalog."default" NOT NULL,
     CONSTRAINT users_pkey PRIMARY KEY (id),
-    CONSTRAINT users_email_key UNIQUE (email),
-    CONSTRAINT users_phone_number_key UNIQUE (phone_number)
+    CONSTRAINT users_email_key UNIQUE (email)
 );
 
 CREATE TABLE IF NOT EXISTS public.institutes

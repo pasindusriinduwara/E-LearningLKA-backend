@@ -1,5 +1,6 @@
 package lk.tutionlms.backend.identity.auth;
 
+import lk.tutionlms.backend.common.DuplicateResourceException;
 import lk.tutionlms.backend.identity.User;
 import lk.tutionlms.backend.identity.UserRepository;
 import lk.tutionlms.backend.identity.Student;
@@ -39,8 +40,14 @@ public class AuthenticationService {
 
     @Transactional
     public AuthenticationResponse register(RegisterRequest request) {
-        if (repository.existsByEmail(request.getEmail())) {
-            throw new RuntimeException("Email already in use");
+        if (request.getEmail() == null || request.getEmail().trim().isBlank()) {
+            throw new IllegalArgumentException("Email address is required.");
+        }
+
+        String email = request.getEmail().trim().toLowerCase();
+
+        if (repository.existsByEmail(email)) {
+            throw new DuplicateResourceException("An account with this email address already exists. Please sign in instead.");
         }
 
         String rawRole = request.getUserType() == null ? "STUDENT" : request.getUserType().trim().toUpperCase();
@@ -48,37 +55,65 @@ public class AuthenticationService {
             throw new IllegalArgumentException("Registration role must be STUDENT or TEACHER.");
         }
 
+        String phone = (request.getPhoneNumber() != null && !request.getPhoneNumber().trim().isBlank())
+                ? request.getPhoneNumber().trim()
+                : null;
+
         var user = User.builder()
-                .email(request.getEmail())
+                .email(email)
                 .password(passwordEncoder.encode(request.getPassword()))
-                .phoneNumber(request.getPhoneNumber())
+                .phoneNumber(phone)
                 .userType(rawRole)
                 .status("ACTIVE")
                 .build();
 
-        repository.save(user);
-        String fullName = "";
+        user = repository.save(user);
 
-        if ("STUDENT".equalsIgnoreCase(request.getUserType())) {
-            String first = request.getFirstName() == null ? "" : request.getFirstName().trim();
-            String last = request.getLastName() == null ? "" : request.getLastName().trim();
-            fullName = (first + " " + last).trim();
+        String first = request.getFirstName() == null ? "" : request.getFirstName().trim();
+        String last = request.getLastName() == null ? "" : request.getLastName().trim();
+        String fullName = (first + " " + last).trim();
+        if (fullName.isBlank()) {
+            fullName = email.split("@")[0];
+        }
+
+        if ("STUDENT".equalsIgnoreCase(rawRole)) {
             String initials = (first + last).replaceAll("\\s+", "").toUpperCase();
-            if (initials.length() > 2)
+            if (initials.isEmpty()) {
+                initials = fullName.length() >= 2 ? fullName.substring(0, 2).toUpperCase() : "ST";
+            } else if (initials.length() > 2) {
                 initials = initials.substring(0, 2);
-            LocalDate dob = request.getDob() == null || request.getDob().isBlank() ? null
-                    : LocalDate.parse(request.getDob());
-            studentRepository.save(Student.builder().userId(user.getId()).name(fullName)
-                    .initials(initials).studentId("ST-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase())
-                    .exam(request.getGrade()).stream(request.getStream()).medium(request.getMedium()).dateOfBirth(dob)
-                    .build());
-        } else if ("TEACHER".equalsIgnoreCase(request.getUserType())) {
-            String first = request.getFirstName() == null ? "" : request.getFirstName().trim();
-            String last = request.getLastName() == null ? "" : request.getLastName().trim();
-            fullName = (first + " " + last).trim();
-            teacherRepository.save(Teacher.builder().userId(user.getId())
+            }
+
+            LocalDate dob = null;
+            if (request.getDob() != null && !request.getDob().trim().isBlank()) {
+                try {
+                    dob = LocalDate.parse(request.getDob().trim());
+                } catch (Exception ignored) {
+                }
+            }
+
+            String studentCode = "ST-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+            while (studentRepository.findByStudentId(studentCode).isPresent()) {
+                studentCode = "ST-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+            }
+
+            studentRepository.save(Student.builder()
+                    .userId(user.getId())
                     .name(fullName)
-                    .qualification(request.getQualification()).bio(request.getExperience()).build());
+                    .initials(initials)
+                    .studentId(studentCode)
+                    .exam(request.getGrade())
+                    .stream(request.getStream())
+                    .medium(request.getMedium())
+                    .dateOfBirth(dob)
+                    .build());
+        } else if ("TEACHER".equalsIgnoreCase(rawRole)) {
+            teacherRepository.save(Teacher.builder()
+                    .userId(user.getId())
+                    .name(fullName)
+                    .qualification(request.getQualification())
+                    .bio(request.getExperience())
+                    .build());
         }
 
         var jwtToken = jwtService.generateToken(user);

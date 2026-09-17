@@ -22,6 +22,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import java.util.*;
 
+import lk.tutionlms.backend.academic.Subject;
+import lk.tutionlms.backend.academic.SubjectRepository;
+
 @Service
 @RequiredArgsConstructor
 public class TeacherService {
@@ -32,6 +35,7 @@ public class TeacherService {
     private final ScheduleRepository scheduleRepository;
     private final MaterialRepository materialRepository;
     private final AnnouncementRepository announcementRepository;
+    private final SubjectRepository subjectRepository;
 
     public Teacher teacher(User user) {
         return teacherRepository.findByUserId(user.getId())
@@ -53,6 +57,24 @@ public class TeacherService {
         teacher.setName(request.getName().trim());
         teacher.setQualification(request.getQualification());
         teacher.setBio(request.getBio());
+
+        if (request.getSubjects() != null) {
+            String raw = request.getSubjects().trim();
+            List<String> cleanList = new ArrayList<>();
+            for (String sub : raw.split(",")) {
+                String clean = sub.trim().replaceAll("\\s+", " ");
+                if (!clean.isBlank() && clean.length() <= 100) {
+                    if (cleanList.stream().noneMatch(s -> s.equalsIgnoreCase(clean))) {
+                        cleanList.add(clean);
+                    }
+                    if (!subjectRepository.existsByNameIgnoreCaseAndDeletedFalse(clean)) {
+                        subjectRepository.save(Subject.builder().name(clean).active(true).build());
+                    }
+                }
+            }
+            teacher.setSubjects(String.join(", ", cleanList));
+        }
+
         teacherRepository.save(teacher);
 
         if (request.getPhoneNumber() != null) {
@@ -74,6 +96,7 @@ public class TeacherService {
                 .initials(generateInitials(teacher.getName()))
                 .qualification(teacher.getQualification())
                 .bio(teacher.getBio())
+                .subjects(teacher.getSubjects())
                 .email(user != null ? user.getEmail() : null)
                 .phoneNumber(user != null ? user.getPhoneNumber() : null)
                 .build();

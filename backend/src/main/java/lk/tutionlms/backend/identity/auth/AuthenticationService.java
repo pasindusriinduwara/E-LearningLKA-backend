@@ -14,7 +14,12 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import lk.tutionlms.backend.academic.Subject;
+import lk.tutionlms.backend.academic.SubjectRepository;
+
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -25,17 +30,20 @@ public class AuthenticationService {
     private final AuthenticationManager authenticationManager;
     private final StudentRepository studentRepository;
     private final TeacherRepository teacherRepository;
+    private final SubjectRepository subjectRepository;
     private final PasswordEncoder passwordEncoder;
 
     public AuthenticationService(UserRepository repository, JwtService jwtService,
             AuthenticationManager authenticationManager, PasswordEncoder passwordEncoder,
-            StudentRepository studentRepository, TeacherRepository teacherRepository) {
+            StudentRepository studentRepository, TeacherRepository teacherRepository,
+            SubjectRepository subjectRepository) {
         this.repository = repository;
         this.jwtService = jwtService;
         this.authenticationManager = authenticationManager;
         this.passwordEncoder = passwordEncoder;
         this.studentRepository = studentRepository;
         this.teacherRepository = teacherRepository;
+        this.subjectRepository = subjectRepository;
     }
 
     @Transactional
@@ -108,11 +116,31 @@ public class AuthenticationService {
                     .dateOfBirth(dob)
                     .build());
         } else if ("TEACHER".equalsIgnoreCase(rawRole)) {
+            List<String> cleanSubjects = new ArrayList<>();
+            if (request.getSubjects() != null) {
+                for (String rawSubject : request.getSubjects()) {
+                    if (rawSubject == null) continue;
+                    String clean = rawSubject.trim().replaceAll("\\s+", " ");
+                    if (!clean.isBlank() && clean.length() <= 100) {
+                        if (cleanSubjects.stream().noneMatch(s -> s.equalsIgnoreCase(clean))) {
+                            cleanSubjects.add(clean);
+                        }
+                        if (!subjectRepository.existsByNameIgnoreCaseAndDeletedFalse(clean)) {
+                            subjectRepository.save(Subject.builder()
+                                    .name(clean)
+                                    .active(true)
+                                    .build());
+                        }
+                    }
+                }
+            }
+
             teacherRepository.save(Teacher.builder()
                     .userId(user.getId())
                     .name(fullName)
                     .qualification(request.getQualification())
                     .bio(request.getExperience())
+                    .subjects(String.join(", ", cleanSubjects))
                     .build());
         }
 

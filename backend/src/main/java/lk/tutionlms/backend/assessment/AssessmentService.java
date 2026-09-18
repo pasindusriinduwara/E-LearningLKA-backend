@@ -7,6 +7,8 @@ import lk.tutionlms.backend.identity.Student;
 import lk.tutionlms.backend.identity.StudentRepository;
 import lk.tutionlms.backend.identity.User;
 import lk.tutionlms.backend.enrollment.EnrollmentRepository;
+import lk.tutionlms.backend.identity.Teacher;
+import lk.tutionlms.backend.identity.TeacherRepository;
 import com.cloudinary.Cloudinary;
 import com.cloudinary.utils.ObjectUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,6 +32,7 @@ public class AssessmentService {
     private final SubmissionRepository submissionRepository;
     private final StudentRepository studentRepository;
     private final EnrollmentRepository enrollmentRepository;
+    private final TeacherRepository teacherRepository;
     private final Cloudinary cloudinary;
 
     @Autowired
@@ -40,6 +43,7 @@ public class AssessmentService {
             SubmissionRepository submissionRepository,
             StudentRepository studentRepository,
             EnrollmentRepository enrollmentRepository,
+            TeacherRepository teacherRepository,
             @Autowired(required = false) Cloudinary cloudinary) {
         this.assessmentRepository = assessmentRepository;
         this.questionRepository = questionRepository;
@@ -47,27 +51,51 @@ public class AssessmentService {
         this.submissionRepository = submissionRepository;
         this.studentRepository = studentRepository;
         this.enrollmentRepository = enrollmentRepository;
+        this.teacherRepository = teacherRepository;
         this.cloudinary = cloudinary;
+    }
+
+    public void verifyTeacherAssessmentAccess(User currentUser, Assessment assessment) {
+        if (currentUser == null) {
+            throw new AccessDeniedException("Authentication required.");
+        }
+        if ("ADMIN".equalsIgnoreCase(currentUser.getUserType())) {
+            return;
+        }
+        Teacher teacher = teacherRepository.findByUserId(currentUser.getId())
+                .orElseThrow(() -> new AccessDeniedException("Teacher profile not found for user."));
+        if (assessment.getBatchId() != null) {
+            Batch batch = batchRepository.findById(assessment.getBatchId())
+                    .orElseThrow(() -> new IllegalArgumentException("Batch not found for assessment."));
+            if (!teacher.getId().equals(batch.getTeacherId())) {
+                throw new AccessDeniedException("You do not have permission to manage assessments for this batch.");
+            }
+        }
     }
 
     @Transactional
     public Assessment createQuizWithQuestions(QuizDto.CreateQuizRequest request) {
+        return createQuizWithQuestions(request, null);
+    }
+
+    @Transactional
+    public Assessment createQuizWithQuestions(QuizDto.CreateQuizRequest request, User currentUser) {
         if (request.getTitle() == null || request.getTitle().isBlank()) {
             throw new IllegalArgumentException("Assessment title is required");
         }
 
-        // Safely resolve batchId to satisfy foreign key constraint
         UUID targetBatchId = request.getBatchId();
         if (targetBatchId == null || !batchRepository.existsById(targetBatchId)) {
-            List<Batch> available = batchRepository.findAll();
-            if (!available.isEmpty()) {
-                targetBatchId = available.get(0).getId();
-            } else {
-                Batch fallbackBatch = batchRepository.save(Batch.builder()
-                        .name("A/L 2026 Batch A")
-                        .subjectId(UUID.randomUUID())
-                        .build());
-                targetBatchId = fallbackBatch.getId();
+            throw new IllegalArgumentException("A valid Batch ID is required to create an assessment");
+        }
+
+        if (currentUser != null && !"ADMIN".equalsIgnoreCase(currentUser.getUserType())) {
+            Teacher teacher = teacherRepository.findByUserId(currentUser.getId())
+                    .orElseThrow(() -> new AccessDeniedException("Teacher profile not found"));
+            Batch batch = batchRepository.findById(targetBatchId)
+                    .orElseThrow(() -> new IllegalArgumentException("Batch not found"));
+            if (!teacher.getId().equals(batch.getTeacherId())) {
+                throw new AccessDeniedException("You do not have permission to create assessments for this batch");
             }
         }
 
@@ -135,10 +163,6 @@ public class AssessmentService {
     public List<QuizDto.AssessmentSummaryResponse> getStudentAssessments(User currentUser, String studentIdParam) {
         UUID studentId = resolveStudentId(currentUser, studentIdParam);
         if (studentId == null) {
-            studentId = ensureDefaultStudentId();
-        }
-
-        if (studentId == null) {
             return Collections.emptyList();
         }
 
@@ -192,12 +216,7 @@ public class AssessmentService {
             String studentIdParam) {
 
         UUID studentId = resolveStudentId(currentUser, studentIdParam);
-        if (studentId == null) {
-            studentId = ensureDefaultStudentId();
-        }
-
-        // Industrial Standard: Enforce active enrollment in this batch
-        if (studentId != null && !enrollmentRepository.isStudentActiveInBatch(studentId, batchId)) {
+        if (studentId == null || !enrollmentRepository.isStudentActiveInBatch(studentId, batchId)) {
             return Collections.emptyList();
         }
 
@@ -273,9 +292,6 @@ public class AssessmentService {
         // Industrial Standard Guard: Verify student is actively enrolled in this assessment's batch
         if (assessment.getBatchId() != null) {
             UUID studentId = resolveStudentId(currentUser, studentIdParam);
-            if (studentId == null) {
-                studentId = ensureDefaultStudentId();
-            }
             if (studentId == null || !enrollmentRepository.isStudentActiveInBatch(studentId, assessment.getBatchId())) {
                 throw new AccessDeniedException("Access denied: You are not enrolled in the class for this assessment.");
             }
@@ -345,14 +361,12 @@ public class AssessmentService {
 
         UUID studentId = resolveStudentId(currentUser, request != null ? request.getStudentId() : null);
         if (studentId == null) {
-            studentId = ensureDefaultStudentId();
+            throw new AccessDeniedException("Access denied: Authenticated student identity could not be verified.");
         }
 
         // Industrial Standard Guard: Verify student is actively enrolled in this assessment's batch
-        if (assessment.getBatchId() != null) {
-            if (studentId == null || !enrollmentRepository.isStudentActiveInBatch(studentId, assessment.getBatchId())) {
-                throw new AccessDeniedException("Access denied: You are not enrolled in the class for this assessment.");
-            }
+        if (assessment.getBatchId() != null && !enrollmentRepository.isStudentActiveInBatch(studentId, assessment.getBatchId())) {
+            throw new AccessDeniedException("Access denied: You are not enrolled in the class for this assessment.");
         }
 
         // Check if student already submitted - return existing graded submission
@@ -437,14 +451,12 @@ public class AssessmentService {
 
         UUID studentId = resolveStudentId(currentUser, studentIdParam);
         if (studentId == null) {
-            studentId = ensureDefaultStudentId();
+            throw new AccessDeniedException("Access denied: Authenticated student identity could not be verified.");
         }
 
         // Industrial Standard Guard: Verify student is actively enrolled in this assessment's batch
-        if (assessment.getBatchId() != null) {
-            if (studentId == null || !enrollmentRepository.isStudentActiveInBatch(studentId, assessment.getBatchId())) {
-                throw new AccessDeniedException("Access denied: You are not enrolled in the class for this assessment.");
-            }
+        if (assessment.getBatchId() != null && !enrollmentRepository.isStudentActiveInBatch(studentId, assessment.getBatchId())) {
+            throw new AccessDeniedException("Access denied: You are not enrolled in the class for this assessment.");
         }
 
         Submission submission = submissionRepository.findByAssessmentAndStudentWithAnswers(assessmentId, studentId)
@@ -526,9 +538,18 @@ public class AssessmentService {
      */
     @Transactional(readOnly = true)
     public List<QuizDto.AssessmentSubmissionSummary> getAssessmentSubmissions(UUID assessmentId) {
+        return getAssessmentSubmissions(assessmentId, null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<QuizDto.AssessmentSubmissionSummary> getAssessmentSubmissions(UUID assessmentId, User currentUser) {
         Assessment assessment = assessmentRepository.findById(assessmentId)
                 .filter(a -> !a.isDeleted())
                 .orElseThrow(() -> new IllegalArgumentException("Assessment not found with id: " + assessmentId));
+
+        if (currentUser != null) {
+            verifyTeacherAssessmentAccess(currentUser, assessment);
+        }
 
         List<Submission> submissions = submissionRepository.findByAssessmentIdAndDeletedFalseOrderBySubmittedAtDesc(assessmentId);
 
@@ -584,14 +605,12 @@ public class AssessmentService {
 
         UUID studentId = resolveStudentId(currentUser, request != null ? request.getStudentId() : null);
         if (studentId == null) {
-            studentId = ensureDefaultStudentId();
+            throw new AccessDeniedException("Access denied: Authenticated student identity could not be verified.");
         }
 
         // Industrial Standard Guard: Verify student is actively enrolled in this assessment's batch
-        if (assessment.getBatchId() != null) {
-            if (studentId == null || !enrollmentRepository.isStudentActiveInBatch(studentId, assessment.getBatchId())) {
-                throw new AccessDeniedException("Access denied: You are not enrolled in the class for this assessment.");
-            }
+        if (assessment.getBatchId() != null && !enrollmentRepository.isStudentActiveInBatch(studentId, assessment.getBatchId())) {
+            throw new AccessDeniedException("Access denied: You are not enrolled in the class for this assessment.");
         }
 
         Optional<Submission> existing = submissionRepository.findByAssessmentAndStudentWithAnswers(assessmentId, studentId);
@@ -626,10 +645,11 @@ public class AssessmentService {
                     .status("SUBMITTED")
                     .paperUploadUrl(request != null ? request.getPaperUploadUrl() : null)
                     .scoreObtained(null)
-                    .answers(new ArrayList<>())
+                    .feedback(null)
                     .build();
 
-            if (request != null && request.getAnswerText() != null) {
+            List<SubmissionAnswer> answers = new ArrayList<>();
+            if (request != null && request.getAnswerText() != null && !request.getAnswerText().isBlank()) {
                 SubmissionAnswer sa = SubmissionAnswer.builder()
                         .submission(submission)
                         .questionId(assessment.getQuestions() != null && !assessment.getQuestions().isEmpty()
@@ -638,17 +658,18 @@ public class AssessmentService {
                         .isCorrect(false)
                         .marksAwarded(BigDecimal.ZERO)
                         .build();
-                submission.getAnswers().add(sa);
+                answers.add(sa);
             }
+            submission.setAnswers(answers);
         }
 
         submission = submissionRepository.save(submission);
 
         return QuizDto.QuizSubmissionResultResponse.builder()
                 .submissionId(submission.getId())
-                .assessmentId(assessment.getId())
+                .assessmentId(assessmentId)
                 .title(assessment.getTitle())
-                .scoreObtained(submission.getScoreObtained())
+                .scoreObtained(BigDecimal.ZERO)
                 .totalMarks(assessment.getTotalMarks())
                 .percentage(0.0)
                 .grade("Submitted")
@@ -667,11 +688,27 @@ public class AssessmentService {
             UUID assessmentId,
             UUID submissionId,
             QuizDto.GradeSubmissionRequest request) {
+        return gradeSubmission(assessmentId, submissionId, request, null);
+    }
+
+    @Transactional
+    public QuizDto.AssessmentSubmissionSummary gradeSubmission(
+            UUID assessmentId,
+            UUID submissionId,
+            QuizDto.GradeSubmissionRequest request,
+            User currentUser) {
+
+        Assessment assessment = getAssessmentById(assessmentId);
+        if (currentUser != null) {
+            verifyTeacherAssessmentAccess(currentUser, assessment);
+        }
 
         Submission submission = submissionRepository.findById(submissionId)
                 .orElseThrow(() -> new IllegalArgumentException("Submission not found with id: " + submissionId));
 
-        Assessment assessment = getAssessmentById(assessmentId);
+        if (!submission.getAssessmentId().equals(assessment.getId())) {
+            throw new IllegalArgumentException("Submission does not belong to the specified assessment.");
+        }
 
         submission.setScoreObtained(request.getScoreObtained());
         submission.setFeedback(request.getFeedback());
@@ -792,36 +829,35 @@ public class AssessmentService {
         return null;
     }
 
-    private UUID ensureDefaultStudentId() {
-        Optional<Student> byCode = studentRepository.findByStudentId("ST-NEW001");
-        if (byCode.isPresent()) {
-            return byCode.get().getId();
-        }
-        List<Student> students = studentRepository.findAll();
-        if (!students.isEmpty()) {
-            return students.get(0).getId();
-        }
-        // Fallback default student
-        Student fallback = studentRepository.save(Student.builder()
-                .name("Pasindu Sri")
-                .studentId("ST-NEW001")
-                .stream("Combined Mathematics")
-                .build());
-        return fallback.getId();
+    @Transactional
+    public Assessment toggleHideAssessment(UUID id) {
+        return toggleHideAssessment(id, null);
     }
 
     @Transactional
-    public Assessment toggleHideAssessment(UUID id) {
+    public Assessment toggleHideAssessment(UUID id, User currentUser) {
         Assessment a = assessmentRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Assessment not found with id: " + id));
+        if (currentUser != null) {
+            verifyTeacherAssessmentAccess(currentUser, a);
+        }
         a.setHidden(!a.isHidden());
         return assessmentRepository.save(a);
     }
 
     @Transactional
     public Assessment updateAssessment(UUID id, QuizDto.UpdateAssessmentRequest request) {
+        return updateAssessment(id, request, null);
+    }
+
+    @Transactional
+    public Assessment updateAssessment(UUID id, QuizDto.UpdateAssessmentRequest request, User currentUser) {
         Assessment a = assessmentRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Assessment not found with id: " + id));
+
+        if (currentUser != null) {
+            verifyTeacherAssessmentAccess(currentUser, a);
+        }
 
         if (request.getTitle() != null && !request.getTitle().isBlank()) {
             a.setTitle(request.getTitle().trim());
@@ -844,8 +880,18 @@ public class AssessmentService {
 
     @Transactional
     public void deleteAssessment(UUID id) {
+        deleteAssessment(id, null);
+    }
+
+    @Transactional
+    public void deleteAssessment(UUID id, User currentUser) {
         Assessment a = assessmentRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Assessment not found with id: " + id));
+
+        if (currentUser != null) {
+            verifyTeacherAssessmentAccess(currentUser, a);
+        }
+
         a.setDeleted(true);
         assessmentRepository.save(a);
     }

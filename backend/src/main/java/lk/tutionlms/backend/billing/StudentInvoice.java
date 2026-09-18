@@ -6,6 +6,8 @@ import jakarta.persistence.Table;
 import lk.tutionlms.backend.common.BaseEntity;
 import lombok.*;
 
+import java.util.UUID;
+
 @Entity
 @Table(name = "invoices")
 @Getter
@@ -14,6 +16,9 @@ import lombok.*;
 @AllArgsConstructor
 @Builder
 public class StudentInvoice extends BaseEntity {
+
+    @Column(name = "student_id")
+    private UUID studentId;
 
     @Column(name = "invoice_number")
     private String invoiceNumber;

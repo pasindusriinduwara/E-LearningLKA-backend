@@ -65,35 +65,45 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/users/**").authenticated()
                         .requestMatchers("/api/v1/students/**").hasRole("STUDENT")
 
-                        .requestMatchers(HttpMethod.POST, "/api/v1/enrollments/request")
-                        .hasRole("STUDENT")
-                        .requestMatchers(HttpMethod.DELETE, "/api/v1/enrollments/request/**")
-                        .hasRole("STUDENT")
-                        .requestMatchers(HttpMethod.POST, "/api/v1/enrollments/batches/*/leave")
-                        .hasRole("STUDENT")
+                        .requestMatchers("/api/v1/enrollments/teacher/**").hasRole("TEACHER")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/pending").hasRole("TEACHER")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/enrollments/request").hasRole("STUDENT")
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/enrollments/request/**").hasRole("STUDENT")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/enrollments/batches/*/leave").hasRole("STUDENT")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/my-status").hasRole("STUDENT")
 
-                        .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/my-status")
-                        .hasRole("STUDENT")
-
-                        .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/pending")
-                        .hasRole("TEACHER")
-
-                        .requestMatchers(HttpMethod.PUT, "/api/v1/enrollments/*/approve")
-                        .hasRole("TEACHER")
-
-                        .requestMatchers(HttpMethod.GET, "/api/v1/enrollments/teacher/batches/**").hasRole("TEACHER")
-
+                        // Assessment Teacher-only mutation and grading routes
+                        .requestMatchers(HttpMethod.POST, "/api/v1/assessments/parse-pdf").hasRole("TEACHER")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/assessments/parse-text").hasRole("TEACHER")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/assessments/upload-paper").hasRole("TEACHER")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/assessments/quiz").hasRole("TEACHER")
                         .requestMatchers(HttpMethod.POST, "/api/v1/assessments").hasRole("TEACHER")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/assessments/*/submissions/*/grade").hasRole("TEACHER")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/assessments/*/submissions").hasRole("TEACHER")
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/assessments/**").hasRole("TEACHER")
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/assessments/**").hasRole("TEACHER")
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/assessments/**").hasRole("TEACHER")
+
+                        // Assessment Student-only taking and submission routes
+                        .requestMatchers(HttpMethod.GET, "/api/v1/assessments/*/take").hasRole("STUDENT")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/assessments/*/submit").hasRole("STUDENT")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/assessments/*/submit-essay").hasRole("STUDENT")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/assessments/*/my-submission").hasRole("STUDENT")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/assessments/student").hasRole("STUDENT")
                         .requestMatchers("/api/v1/assessments/**").authenticated()
 
                         .requestMatchers("/api/v1/materials/**").authenticated()
 
+                        .requestMatchers(HttpMethod.POST, "/api/v1/schedules/**").hasRole("TEACHER")
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/schedules/**").hasRole("TEACHER")
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/schedules/**").hasRole("TEACHER")
                         .requestMatchers(HttpMethod.GET, "/api/v1/schedules/**").permitAll()
                         .requestMatchers("/api/v1/schedules/**").authenticated()
 
                         .requestMatchers(HttpMethod.GET, "/api/v1/announcements/**").permitAll()
                         .requestMatchers("/api/v1/announcements/**").authenticated()
 
+                        .requestMatchers(HttpMethod.GET, "/api/v1/invoices/my-invoices").hasRole("STUDENT")
                         .requestMatchers("/api/v1/invoices/**").authenticated()
 
                         .anyRequest().authenticated())

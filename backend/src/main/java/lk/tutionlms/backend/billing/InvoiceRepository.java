@@ -9,4 +9,5 @@ import java.util.UUID;
 @Repository
 public interface InvoiceRepository extends JpaRepository<StudentInvoice, UUID> {
     List<StudentInvoice> findByDeletedFalse();
+    List<StudentInvoice> findByStudentIdAndDeletedFalse(UUID studentId);
 }

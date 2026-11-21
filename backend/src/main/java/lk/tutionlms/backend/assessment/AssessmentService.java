@@ -1,12 +1,15 @@
 package lk.tutionlms.backend.assessment;
 
 import lk.tutionlms.backend.assessment.dto.QuizDto;
+import lk.tutionlms.backend.assessment.dto.ResultDto;
 import lk.tutionlms.backend.batch.Batch;
 import lk.tutionlms.backend.batch.BatchRepository;
 import lk.tutionlms.backend.identity.Student;
 import lk.tutionlms.backend.identity.StudentRepository;
 import lk.tutionlms.backend.identity.User;
 import lk.tutionlms.backend.enrollment.EnrollmentRepository;
+import lk.tutionlms.backend.identity.Teacher;
+import lk.tutionlms.backend.identity.TeacherRepository;
 import com.cloudinary.Cloudinary;
 import com.cloudinary.utils.ObjectUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,7 +33,9 @@ public class AssessmentService {
     private final SubmissionRepository submissionRepository;
     private final StudentRepository studentRepository;
     private final EnrollmentRepository enrollmentRepository;
+    private final TeacherRepository teacherRepository;
     private final Cloudinary cloudinary;
+    private final AssessmentFileRepository assessmentFileRepository;
 
     @Autowired
     public AssessmentService(
@@ -40,6 +45,8 @@ public class AssessmentService {
             SubmissionRepository submissionRepository,
             StudentRepository studentRepository,
             EnrollmentRepository enrollmentRepository,
+            TeacherRepository teacherRepository,
+            AssessmentFileRepository assessmentFileRepository,
             @Autowired(required = false) Cloudinary cloudinary) {
         this.assessmentRepository = assessmentRepository;
         this.questionRepository = questionRepository;
@@ -47,27 +54,56 @@ public class AssessmentService {
         this.submissionRepository = submissionRepository;
         this.studentRepository = studentRepository;
         this.enrollmentRepository = enrollmentRepository;
+        this.teacherRepository = teacherRepository;
         this.cloudinary = cloudinary;
+        this.assessmentFileRepository = assessmentFileRepository;
+    }
+
+    public void verifyTeacherAssessmentAccess(User currentUser, Assessment assessment) {
+        if (currentUser == null) {
+            throw new AccessDeniedException("Authentication required.");
+        }
+        if ("ADMIN".equalsIgnoreCase(currentUser.getUserType())) {
+            return;
+        }
+        if (!"TEACHER".equalsIgnoreCase(currentUser.getUserType()) || assessment.getBatchId() == null) {
+            throw new AccessDeniedException("Teacher access to an owned batch is required.");
+        }
+        Teacher teacher = teacherRepository.findByUserId(currentUser.getId())
+                .orElseThrow(() -> new AccessDeniedException("Teacher profile not found for user."));
+        if (assessment.getBatchId() != null) {
+            Batch batch = batchRepository.findById(assessment.getBatchId())
+                    .orElseThrow(() -> new IllegalArgumentException("Batch not found for assessment."));
+            if (!teacher.getId().equals(batch.getTeacherId())) {
+                throw new AccessDeniedException("You do not have permission to manage assessments for this batch.");
+            }
+        }
     }
 
     @Transactional
     public Assessment createQuizWithQuestions(QuizDto.CreateQuizRequest request) {
+        return createQuizWithQuestions(request, null);
+    }
+
+    @Transactional
+    public Assessment createQuizWithQuestions(QuizDto.CreateQuizRequest request, User currentUser) {
         if (request.getTitle() == null || request.getTitle().isBlank()) {
             throw new IllegalArgumentException("Assessment title is required");
         }
+        verifyUploadedFileOwner(request.getAttachmentUrl(), currentUser, null, false);
 
-        // Safely resolve batchId to satisfy foreign key constraint
         UUID targetBatchId = request.getBatchId();
         if (targetBatchId == null || !batchRepository.existsById(targetBatchId)) {
-            List<Batch> available = batchRepository.findAll();
-            if (!available.isEmpty()) {
-                targetBatchId = available.get(0).getId();
-            } else {
-                Batch fallbackBatch = batchRepository.save(Batch.builder()
-                        .name("A/L 2026 Batch A")
-                        .subjectId(UUID.randomUUID())
-                        .build());
-                targetBatchId = fallbackBatch.getId();
+            throw new IllegalArgumentException("A valid Batch ID is required to create an assessment");
+        }
+
+        if (currentUser != null && !"ADMIN".equalsIgnoreCase(currentUser.getUserType())) {
+            Teacher teacher = teacherRepository.findByUserId(currentUser.getId())
+                    .orElseThrow(() -> new AccessDeniedException("Teacher profile not found"));
+            Batch batch = batchRepository.findById(targetBatchId)
+                    .orElseThrow(() -> new IllegalArgumentException("Batch not found"));
+            if (!teacher.getId().equals(batch.getTeacherId())) {
+                throw new AccessDeniedException("You do not have permission to create assessments for this batch");
             }
         }
 
@@ -124,8 +160,16 @@ public class AssessmentService {
     }
 
     @Transactional(readOnly = true)
-    public List<QuizDto.AssessmentSummaryResponse> getAllAssessments() {
-        return assessmentRepository.findByDeletedFalseOrderByCreatedAtDesc()
+    public List<QuizDto.AssessmentSummaryResponse> getAllAssessments(User currentUser) {
+        if (currentUser == null || !"TEACHER".equalsIgnoreCase(currentUser.getUserType())) {
+            throw new AccessDeniedException("Teacher authentication required.");
+        }
+        Teacher teacher = teacherRepository.findByUserId(currentUser.getId())
+                .orElseThrow(() -> new AccessDeniedException("Teacher profile not found."));
+        List<UUID> batchIds = batchRepository.findByTeacherIdAndDeletedFalse(teacher.getId())
+                .stream().map(Batch::getId).toList();
+        if (batchIds.isEmpty()) return List.of();
+        return assessmentRepository.findByBatchIdInAndDeletedFalseOrderByCreatedAtDesc(batchIds)
                 .stream()
                 .map(this::mapToSummary)
                 .collect(Collectors.toList());
@@ -134,10 +178,6 @@ public class AssessmentService {
     @Transactional(readOnly = true)
     public List<QuizDto.AssessmentSummaryResponse> getStudentAssessments(User currentUser, String studentIdParam) {
         UUID studentId = resolveStudentId(currentUser, studentIdParam);
-        if (studentId == null) {
-            studentId = ensureDefaultStudentId();
-        }
-
         if (studentId == null) {
             return Collections.emptyList();
         }
@@ -158,17 +198,7 @@ public class AssessmentService {
                     QuizDto.AssessmentSummaryResponse summary = mapToSummary(a);
                     if (studentSubmissions.containsKey(a.getId())) {
                         Submission sub = studentSubmissions.get(a.getId());
-                        summary.setSubmitted(true);
-                        summary.setScoreObtained(sub.getScoreObtained());
-                        summary.setPaperUploadUrl(sub.getPaperUploadUrl());
-                        summary.setFeedback(sub.getFeedback());
-                        String subStatus = "GRADED".equalsIgnoreCase(sub.getStatus()) ? "Graded" : "Submitted";
-                        summary.setStatus(subStatus);
-                        if ("Graded".equals(subStatus) && sub.getScoreObtained() != null) {
-                            summary.setGrade(calculateGrade(sub.getScoreObtained(), a.getTotalMarks()));
-                        } else {
-                            summary.setGrade(null);
-                        }
+                        applyStudentResult(summary, a, sub);
                     } else {
                         summary.setSubmitted(false);
                     }
@@ -178,7 +208,9 @@ public class AssessmentService {
     }
 
     @Transactional(readOnly = true)
-    public List<QuizDto.AssessmentSummaryResponse> getAssessmentsByBatch(UUID batchId) {
+    public List<QuizDto.AssessmentSummaryResponse> getAssessmentsByBatch(UUID batchId, User currentUser) {
+        Assessment scope = Assessment.builder().batchId(batchId).build();
+        verifyTeacherAssessmentAccess(currentUser, scope);
         return assessmentRepository.findByBatchIdAndDeletedFalseOrderByCreatedAtDesc(batchId)
                 .stream()
                 .map(this::mapToSummary)
@@ -192,12 +224,7 @@ public class AssessmentService {
             String studentIdParam) {
 
         UUID studentId = resolveStudentId(currentUser, studentIdParam);
-        if (studentId == null) {
-            studentId = ensureDefaultStudentId();
-        }
-
-        // Industrial Standard: Enforce active enrollment in this batch
-        if (studentId != null && !enrollmentRepository.isStudentActiveInBatch(studentId, batchId)) {
+        if (studentId == null || !enrollmentRepository.isStudentActiveInBatch(studentId, batchId)) {
             return Collections.emptyList();
         }
 
@@ -214,17 +241,7 @@ public class AssessmentService {
                     QuizDto.AssessmentSummaryResponse summary = mapToSummary(a);
                     if (studentSubmissions.containsKey(a.getId())) {
                         Submission sub = studentSubmissions.get(a.getId());
-                        summary.setSubmitted(true);
-                        summary.setScoreObtained(sub.getScoreObtained());
-                        summary.setPaperUploadUrl(sub.getPaperUploadUrl());
-                        summary.setFeedback(sub.getFeedback());
-                        String subStatus = "GRADED".equalsIgnoreCase(sub.getStatus()) ? "Graded" : "Submitted";
-                        summary.setStatus(subStatus);
-                        if ("Graded".equals(subStatus) && sub.getScoreObtained() != null) {
-                            summary.setGrade(calculateGrade(sub.getScoreObtained(), a.getTotalMarks()));
-                        } else {
-                            summary.setGrade(null);
-                        }
+                        applyStudentResult(summary, a, sub);
                     } else {
                         summary.setSubmitted(false);
                     }
@@ -245,6 +262,13 @@ public class AssessmentService {
                 }
             }
         }
+        return assessment;
+    }
+
+    @Transactional(readOnly = true)
+    public Assessment getTeacherAssessment(UUID id, User currentUser) {
+        Assessment assessment = getAssessmentById(id);
+        verifyTeacherAssessmentAccess(currentUser, assessment);
         return assessment;
     }
 
@@ -273,9 +297,6 @@ public class AssessmentService {
         // Industrial Standard Guard: Verify student is actively enrolled in this assessment's batch
         if (assessment.getBatchId() != null) {
             UUID studentId = resolveStudentId(currentUser, studentIdParam);
-            if (studentId == null) {
-                studentId = ensureDefaultStudentId();
-            }
             if (studentId == null || !enrollmentRepository.isStudentActiveInBatch(studentId, assessment.getBatchId())) {
                 throw new AccessDeniedException("Access denied: You are not enrolled in the class for this assessment.");
             }
@@ -341,18 +362,16 @@ public class AssessmentService {
             QuizDto.QuizSubmissionRequest request,
             User currentUser) {
 
-        Assessment assessment = getAssessmentById(assessmentId);
+        Assessment assessment = lockAssessment(assessmentId);
 
         UUID studentId = resolveStudentId(currentUser, request != null ? request.getStudentId() : null);
         if (studentId == null) {
-            studentId = ensureDefaultStudentId();
+            throw new AccessDeniedException("Access denied: Authenticated student identity could not be verified.");
         }
 
         // Industrial Standard Guard: Verify student is actively enrolled in this assessment's batch
-        if (assessment.getBatchId() != null) {
-            if (studentId == null || !enrollmentRepository.isStudentActiveInBatch(studentId, assessment.getBatchId())) {
-                throw new AccessDeniedException("Access denied: You are not enrolled in the class for this assessment.");
-            }
+        if (assessment.getBatchId() != null && !enrollmentRepository.isStudentActiveInBatch(studentId, assessment.getBatchId())) {
+            throw new AccessDeniedException("Access denied: You are not enrolled in the class for this assessment.");
         }
 
         // Check if student already submitted - return existing graded submission
@@ -437,14 +456,12 @@ public class AssessmentService {
 
         UUID studentId = resolveStudentId(currentUser, studentIdParam);
         if (studentId == null) {
-            studentId = ensureDefaultStudentId();
+            throw new AccessDeniedException("Access denied: Authenticated student identity could not be verified.");
         }
 
         // Industrial Standard Guard: Verify student is actively enrolled in this assessment's batch
-        if (assessment.getBatchId() != null) {
-            if (studentId == null || !enrollmentRepository.isStudentActiveInBatch(studentId, assessment.getBatchId())) {
-                throw new AccessDeniedException("Access denied: You are not enrolled in the class for this assessment.");
-            }
+        if (assessment.getBatchId() != null && !enrollmentRepository.isStudentActiveInBatch(studentId, assessment.getBatchId())) {
+            throw new AccessDeniedException("Access denied: You are not enrolled in the class for this assessment.");
         }
 
         Submission submission = submissionRepository.findByAssessmentAndStudentWithAnswers(assessmentId, studentId)
@@ -454,6 +471,14 @@ public class AssessmentService {
     }
 
     private QuizDto.QuizSubmissionResultResponse buildSubmissionResult(Assessment assessment, Submission submission) {
+        if (!isResultVisible(submission)) {
+            return QuizDto.QuizSubmissionResultResponse.builder()
+                    .submissionId(submission.getId()).assessmentId(assessment.getId()).title(assessment.getTitle())
+                    .totalMarks(assessment.getTotalMarks()).submittedAt(submission.getSubmittedAt())
+                    .status(submission.getStatus()).resultPublished(false)
+                    .totalQuestions(assessment.getQuestions() != null ? assessment.getQuestions().size() : 0)
+                    .answers(List.of()).build();
+        }
         BigDecimal score = submission.getScoreObtained() != null ? submission.getScoreObtained() : BigDecimal.ZERO;
         BigDecimal totalMarks = assessment.getTotalMarks() != null && assessment.getTotalMarks().compareTo(BigDecimal.ZERO) > 0
                 ? assessment.getTotalMarks()
@@ -517,6 +542,10 @@ public class AssessmentService {
                 .correctCount(correctCount)
                 .totalQuestions(assessment.getQuestions() != null ? assessment.getQuestions().size() : 0)
                 .submittedAt(submission.getSubmittedAt())
+                .status(submission.getStatus())
+                .resultPublished(true)
+                .resultPublishedAt(submission.getResultPublishedAt())
+                .feedback(submission.getFeedback())
                 .answers(reviewAnswers)
                 .build();
     }
@@ -526,9 +555,18 @@ public class AssessmentService {
      */
     @Transactional(readOnly = true)
     public List<QuizDto.AssessmentSubmissionSummary> getAssessmentSubmissions(UUID assessmentId) {
+        return getAssessmentSubmissions(assessmentId, null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<QuizDto.AssessmentSubmissionSummary> getAssessmentSubmissions(UUID assessmentId, User currentUser) {
         Assessment assessment = assessmentRepository.findById(assessmentId)
                 .filter(a -> !a.isDeleted())
                 .orElseThrow(() -> new IllegalArgumentException("Assessment not found with id: " + assessmentId));
+
+        if (currentUser != null) {
+            verifyTeacherAssessmentAccess(currentUser, assessment);
+        }
 
         List<Submission> submissions = submissionRepository.findByAssessmentIdAndDeletedFalseOrderBySubmittedAtDesc(assessmentId);
 
@@ -567,6 +605,8 @@ public class AssessmentService {
                     .paperUploadUrl(s.getPaperUploadUrl())
                     .answerText(answerText)
                     .feedback(s.getFeedback())
+                    .resultPublished(isResultVisible(s))
+                    .resultPublishedAt(s.getResultPublishedAt())
                     .build();
         }).collect(Collectors.toList());
     }
@@ -580,19 +620,15 @@ public class AssessmentService {
             QuizDto.EssaySubmissionRequest request,
             User currentUser) {
 
-        Assessment assessment = getAssessmentById(assessmentId);
-
-        UUID studentId = resolveStudentId(currentUser, request != null ? request.getStudentId() : null);
-        if (studentId == null) {
-            studentId = ensureDefaultStudentId();
+        Assessment assessment = lockAssessment(assessmentId);
+        boolean hasFile = request != null && request.getPaperUploadUrl() != null && !request.getPaperUploadUrl().isBlank();
+        boolean hasText = request != null && request.getAnswerText() != null && !request.getAnswerText().isBlank();
+        UUID studentId = validateEssaySubmission(assessment, currentUser, hasFile);
+        if (!hasFile && !hasText) throw new IllegalArgumentException("An answer is required.");
+        if ("FILE_UPLOAD".equalsIgnoreCase(assessment.getSubmissionType()) && !hasFile) {
+            throw new IllegalArgumentException("Please upload an answer file for this assessment.");
         }
-
-        // Industrial Standard Guard: Verify student is actively enrolled in this assessment's batch
-        if (assessment.getBatchId() != null) {
-            if (studentId == null || !enrollmentRepository.isStudentActiveInBatch(studentId, assessment.getBatchId())) {
-                throw new AccessDeniedException("Access denied: You are not enrolled in the class for this assessment.");
-            }
-        }
+        verifyUploadedFileOwner(request.getPaperUploadUrl(), currentUser, assessmentId, true);
 
         Optional<Submission> existing = submissionRepository.findByAssessmentAndStudentWithAnswers(assessmentId, studentId);
         Submission submission;
@@ -626,10 +662,11 @@ public class AssessmentService {
                     .status("SUBMITTED")
                     .paperUploadUrl(request != null ? request.getPaperUploadUrl() : null)
                     .scoreObtained(null)
-                    .answers(new ArrayList<>())
+                    .feedback(null)
                     .build();
 
-            if (request != null && request.getAnswerText() != null) {
+            List<SubmissionAnswer> answers = new ArrayList<>();
+            if (request != null && request.getAnswerText() != null && !request.getAnswerText().isBlank()) {
                 SubmissionAnswer sa = SubmissionAnswer.builder()
                         .submission(submission)
                         .questionId(assessment.getQuestions() != null && !assessment.getQuestions().isEmpty()
@@ -638,21 +675,21 @@ public class AssessmentService {
                         .isCorrect(false)
                         .marksAwarded(BigDecimal.ZERO)
                         .build();
-                submission.getAnswers().add(sa);
+                answers.add(sa);
             }
+            submission.setAnswers(answers);
         }
 
         submission = submissionRepository.save(submission);
 
         return QuizDto.QuizSubmissionResultResponse.builder()
                 .submissionId(submission.getId())
-                .assessmentId(assessment.getId())
+                .assessmentId(assessmentId)
                 .title(assessment.getTitle())
-                .scoreObtained(submission.getScoreObtained())
+                .scoreObtained(null)
                 .totalMarks(assessment.getTotalMarks())
-                .percentage(0.0)
-                .grade("Submitted")
-                .correctCount(0)
+                .status("SUBMITTED")
+                .resultPublished(false)
                 .totalQuestions(1)
                 .submittedAt(submission.getSubmittedAt())
                 .answers(new ArrayList<>())
@@ -667,15 +704,37 @@ public class AssessmentService {
             UUID assessmentId,
             UUID submissionId,
             QuizDto.GradeSubmissionRequest request) {
+        return gradeSubmission(assessmentId, submissionId, request, null);
+    }
+
+    @Transactional
+    public QuizDto.AssessmentSubmissionSummary gradeSubmission(
+            UUID assessmentId,
+            UUID submissionId,
+            QuizDto.GradeSubmissionRequest request,
+            User currentUser) {
+
+        Assessment assessment = lockAssessment(assessmentId);
+        if (currentUser != null) {
+            verifyTeacherAssessmentAccess(currentUser, assessment);
+        }
 
         Submission submission = submissionRepository.findById(submissionId)
                 .orElseThrow(() -> new IllegalArgumentException("Submission not found with id: " + submissionId));
 
-        Assessment assessment = getAssessmentById(assessmentId);
+        if (!submission.getAssessmentId().equals(assessment.getId())) {
+            throw new IllegalArgumentException("Submission does not belong to the specified assessment.");
+        }
 
+        if (request == null || request.getScoreObtained() == null
+                || request.getScoreObtained().compareTo(BigDecimal.ZERO) < 0
+                || request.getScoreObtained().compareTo(assessment.getTotalMarks()) > 0) {
+            throw new IllegalArgumentException("Marks must be between zero and the assessment's total marks.");
+        }
         submission.setScoreObtained(request.getScoreObtained());
         submission.setFeedback(request.getFeedback());
         submission.setStatus("GRADED");
+        revokeResult(submission);
         submission = submissionRepository.save(submission);
 
         String grade = calculateGrade(submission.getScoreObtained(), assessment.getTotalMarks());
@@ -704,15 +763,223 @@ public class AssessmentService {
                 .paperUploadUrl(submission.getPaperUploadUrl())
                 .answerText(answerText)
                 .feedback(submission.getFeedback())
+                .resultPublished(false)
                 .build();
+    }
+
+    private boolean isResultVisible(Submission submission) {
+        return submission.isResultPublished() && "GRADED".equalsIgnoreCase(submission.getStatus())
+                && submission.getScoreObtained() != null;
+    }
+
+    private void applyStudentResult(QuizDto.AssessmentSummaryResponse summary, Assessment assessment, Submission submission) {
+        boolean visible = isResultVisible(submission);
+        summary.setSubmitted(true);
+        summary.setResultPublished(visible);
+        summary.setResultPublishedAt(visible ? submission.getResultPublishedAt() : null);
+        summary.setPaperUploadUrl(submission.getPaperUploadUrl());
+        summary.setScoreObtained(visible ? submission.getScoreObtained() : null);
+        summary.setFeedback(visible ? submission.getFeedback() : null);
+        summary.setGrade(visible ? calculateGrade(submission.getScoreObtained(), assessment.getTotalMarks()) : null);
+        summary.setStatus(visible ? "Graded" : "GRADED".equalsIgnoreCase(submission.getStatus())
+                ? "Awaiting publication" : "Submitted");
+    }
+
+    private Assessment lockAssessment(UUID id) {
+        return assessmentRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new IllegalArgumentException("Assessment not found."));
+    }
+
+    private void revokeResult(Submission submission) {
+        submission.setResultPublished(false);
+        submission.setResultPublishedAt(null);
+        submission.setResultPublishedBy(null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ResultDto.Summary> getTeacherResults(User user) {
+        return getAllAssessments(user).stream().map(summary -> resultSummary(summary,
+                submissionRepository.findByAssessmentIdAndDeletedFalseOrderBySubmittedAtDesc(summary.getId()))).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public ResultDto.Detail getTeacherResultDetail(UUID id, User user) {
+        Assessment assessment = getTeacherAssessment(id, user);
+        List<Submission> submissions = submissionRepository.findByAssessmentIdAndDeletedFalseOrderBySubmittedAtDesc(id);
+        List<QuizDto.AssessmentSubmissionSummary> rows = getAssessmentSubmissions(id, user);
+        List<QuizDto.AssessmentSubmissionSummary> ranked = rows.stream()
+                .filter(row -> "Graded".equals(row.getStatus()) && row.getMarks() != null)
+                .sorted(Comparator.comparing(QuizDto.AssessmentSubmissionSummary::getMarks).reversed()).toList();
+        BigDecimal previous = null;
+        int rank = 0;
+        for (int i = 0; i < ranked.size(); i++) {
+            if (previous == null || previous.compareTo(ranked.get(i).getMarks()) != 0) rank = i + 1;
+            ranked.get(i).setRank(rank);
+            previous = ranked.get(i).getMarks();
+        }
+        rows.sort(Comparator.comparing(QuizDto.AssessmentSubmissionSummary::getRank,
+                Comparator.nullsLast(Comparator.naturalOrder()))
+                .thenComparing(QuizDto.AssessmentSubmissionSummary::getStudentName));
+        return new ResultDto.Detail(resultSummary(mapToSummary(assessment), submissions), rows);
+    }
+
+    @Transactional
+    public ResultDto.Detail publishResults(UUID id, User user) {
+        Assessment assessment = lockAssessment(id);
+        verifyTeacherAssessmentAccess(user, assessment);
+        List<Submission> submissions = submissionRepository.findByAssessmentIdAndDeletedFalseOrderBySubmittedAtDesc(id);
+        List<Submission> graded = submissions.stream().filter(s -> "GRADED".equalsIgnoreCase(s.getStatus())
+                && s.getScoreObtained() != null).toList();
+        if (graded.isEmpty()) throw new IllegalArgumentException("Grade at least one submission before publishing results.");
+        for (Submission submission : graded) {
+            if (submission.getScoreObtained().signum() < 0
+                    || submission.getScoreObtained().compareTo(assessment.getTotalMarks()) > 0) {
+                throw new IllegalArgumentException("Correct invalid marks before publishing results.");
+            }
+        }
+        LocalDateTime now = LocalDateTime.now();
+        for (Submission submission : graded) {
+            if (!submission.isResultPublished()) {
+                submission.setResultPublished(true);
+                submission.setResultPublishedAt(now);
+                submission.setResultPublishedBy(user.getId());
+            }
+        }
+        submissionRepository.saveAllAndFlush(graded);
+        return getTeacherResultDetail(id, user);
+    }
+
+    @Transactional
+    public ResultDto.Detail unpublishResults(UUID id, User user) {
+        Assessment assessment = lockAssessment(id);
+        verifyTeacherAssessmentAccess(user, assessment);
+        List<Submission> submissions = submissionRepository.findByAssessmentIdAndDeletedFalseOrderBySubmittedAtDesc(id);
+        submissions.forEach(this::revokeResult);
+        submissionRepository.saveAllAndFlush(submissions);
+        return getTeacherResultDetail(id, user);
+    }
+
+    private ResultDto.Summary resultSummary(QuizDto.AssessmentSummaryResponse assessment, List<Submission> submissions) {
+        List<Submission> graded = submissions.stream().filter(s -> "GRADED".equalsIgnoreCase(s.getStatus())
+                && s.getScoreObtained() != null).toList();
+        BigDecimal total = graded.stream().map(Submission::getScoreObtained).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal highest = graded.stream().map(Submission::getScoreObtained).max(BigDecimal::compareTo).orElse(null);
+        BigDecimal average = graded.isEmpty() ? null : total.divide(BigDecimal.valueOf(graded.size()), 2, RoundingMode.HALF_UP);
+        long passed = graded.stream().filter(s -> s.getScoreObtained().compareTo(
+                assessment.getTotalMarks().multiply(new BigDecimal("0.4"))) >= 0).count();
+        BigDecimal passRate = graded.isEmpty() ? null : BigDecimal.valueOf(passed * 100)
+                .divide(BigDecimal.valueOf(graded.size()), 1, RoundingMode.HALF_UP);
+        LocalDateTime lastPublished = submissions.stream().filter(this::isResultVisible)
+                .map(Submission::getResultPublishedAt).filter(Objects::nonNull).max(LocalDateTime::compareTo).orElse(null);
+        return new ResultDto.Summary(assessment.getId(), assessment.getBatchId(), assessment.getBatchName(),
+                assessment.getTitle(), assessment.getAssessmentType(), assessment.getTotalMarks(), submissions.size(),
+                graded.size(), (int) submissions.stream().filter(this::isResultVisible).count(),
+                enrollmentRepository.countByBatchIdAndStatusAndDeletedFalse(assessment.getBatchId(), "ACTIVE"),
+                average, highest, passRate, lastPublished);
     }
 
     /**
      * Upload question paper or answer sheet.
      */
-    public Map<String, String> uploadPaperFile(MultipartFile file) {
+    @Transactional
+    public Map<String, String> uploadPaperFile(MultipartFile file, User currentUser) {
+        if (currentUser == null || !"TEACHER".equalsIgnoreCase(currentUser.getUserType())) {
+            throw new AccessDeniedException("Teacher authentication required.");
+        }
+        return storePaperFile(file, currentUser, null, false);
+    }
+
+    @Transactional
+    public Map<String, String> uploadAnswerFile(UUID assessmentId, MultipartFile file, User currentUser) {
+        Assessment assessment = getAssessmentById(assessmentId);
+        validateEssaySubmission(assessment, currentUser, true);
+        return storePaperFile(file, currentUser, assessmentId, true);
+    }
+
+    private UUID validateEssaySubmission(Assessment assessment, User currentUser, boolean fileUpload) {
+        if (currentUser == null || !"STUDENT".equalsIgnoreCase(currentUser.getUserType())) {
+            throw new AccessDeniedException("Student authentication required.");
+        }
+        UUID studentId = studentRepository.findByUserId(currentUser.getId()).map(Student::getId)
+                .orElseThrow(() -> new AccessDeniedException("Student profile not found."));
+        if (assessment.getBatchId() == null
+                || !enrollmentRepository.isStudentActiveInBatch(studentId, assessment.getBatchId())) {
+            throw new AccessDeniedException("You are not enrolled in this assessment's batch.");
+        }
+        if (assessment.isHidden() || assessment.isDeleted()
+                || (assessment.getDueDate() != null && assessment.getDueDate().isBefore(LocalDateTime.now()))) {
+            throw new IllegalArgumentException("This assessment is not accepting submissions.");
+        }
+        if ("MCQ_QUIZ".equalsIgnoreCase(assessment.getAssessmentType())) {
+            throw new IllegalArgumentException("Use the quiz submission endpoint for MCQ quizzes.");
+        }
+        if (fileUpload && "TEXT".equalsIgnoreCase(assessment.getSubmissionType())) {
+            throw new IllegalArgumentException("This assessment accepts text answers only.");
+        }
+        submissionRepository.findByAssessmentIdAndStudentIdAndDeletedFalse(assessment.getId(), studentId)
+                .filter(s -> "GRADED".equalsIgnoreCase(s.getStatus()))
+                .ifPresent(s -> { throw new IllegalArgumentException("A graded submission cannot be replaced."); });
+        return studentId;
+    }
+
+    @Transactional(readOnly = true)
+    public void verifyFileAccess(String filename, User currentUser) {
+        if (currentUser == null || filename.contains("/") || filename.contains("\\") || filename.contains("..")) {
+            throw new AccessDeniedException("File access denied.");
+        }
+        Optional<AssessmentFile> stored = assessmentFileRepository.findByFilenameAndDeletedFalse(filename);
+        if (stored.isPresent() && stored.get().getUploadedBy().equals(currentUser.getId())) return;
+        if (stored.isPresent() && stored.get().isAnswerSheet() && stored.get().getAssessmentId() != null) {
+            verifyTeacherAssessmentAccess(currentUser, getAssessmentById(stored.get().getAssessmentId()));
+            return;
+        }
+        String url = "/api/v1/assessments/files/" + filename;
+        for (Assessment assessment : assessmentRepository.findByAttachmentUrlAndDeletedFalse(url)) {
+            if (canReadAssessmentFile(assessment, currentUser)) return;
+        }
+        for (Submission submission : submissionRepository.findByPaperUploadUrlAndDeletedFalse(url)) {
+            if (studentRepository.findByUserId(currentUser.getId())
+                    .map(s -> s.getId().equals(submission.getStudentId())).orElse(false)) return;
+            if (isAssessmentTeacher(getAssessmentById(submission.getAssessmentId()), currentUser)) return;
+        }
+        throw new AccessDeniedException("File access denied.");
+    }
+
+    private boolean canReadAssessmentFile(Assessment assessment, User user) {
+        if (isAssessmentTeacher(assessment, user)) return true;
+        return "STUDENT".equalsIgnoreCase(user.getUserType()) && !assessment.isHidden()
+                && studentRepository.findByUserId(user.getId())
+                    .map(s -> enrollmentRepository.isStudentActiveInBatch(s.getId(), assessment.getBatchId()))
+                    .orElse(false);
+    }
+
+    private boolean isAssessmentTeacher(Assessment assessment, User user) {
+        if (!"TEACHER".equalsIgnoreCase(user.getUserType())) return false;
+        try {
+            verifyTeacherAssessmentAccess(user, assessment);
+            return true;
+        } catch (AccessDeniedException | IllegalArgumentException ex) {
+            return false;
+        }
+    }
+
+    private void verifyUploadedFileOwner(String url, User user, UUID assessmentId, boolean answerSheet) {
+        String prefix = "/api/v1/assessments/files/";
+        if (url == null || !url.startsWith(prefix)) return;
+        AssessmentFile file = assessmentFileRepository.findByFilenameAndDeletedFalse(url.substring(prefix.length()))
+                .orElseThrow(() -> new AccessDeniedException("Uploaded file ownership could not be verified."));
+        if (user == null || !file.getUploadedBy().equals(user.getId()) || file.isAnswerSheet() != answerSheet
+                || !Objects.equals(file.getAssessmentId(), assessmentId)) {
+            throw new AccessDeniedException("This uploaded file does not belong to the current submission.");
+        }
+    }
+
+    private Map<String, String> storePaperFile(MultipartFile file, User currentUser, UUID assessmentId, boolean answerSheet) {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("File cannot be empty");
+        }
+        if (file.getSize() > 20 * 1024 * 1024) {
+            throw new IllegalArgumentException("File must be 20 MB or smaller.");
         }
         String originalName = file.getOriginalFilename() != null ? file.getOriginalFilename() : "paper.pdf";
         try {
@@ -745,7 +1012,20 @@ public class AssessmentService {
             }
             String uniqueName = UUID.randomUUID() + "_" + originalName.replaceAll("[^a-zA-Z0-9.-]", "_");
             java.nio.file.Path targetPath = uploadDir.resolve(uniqueName);
-            java.nio.file.Files.copy(file.getInputStream(), targetPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            try (java.io.InputStream input = file.getInputStream()) {
+                java.nio.file.Files.copy(input, targetPath);
+            }
+            AssessmentFile stored = new AssessmentFile();
+            stored.setFilename(uniqueName);
+            stored.setUploadedBy(currentUser.getId());
+            stored.setAssessmentId(assessmentId);
+            stored.setAnswerSheet(answerSheet);
+            try {
+                assessmentFileRepository.saveAndFlush(stored);
+            } catch (RuntimeException ex) {
+                java.nio.file.Files.deleteIfExists(targetPath);
+                throw ex;
+            }
 
             Map<String, String> response = new HashMap<>();
             response.put("url", "/api/v1/assessments/files/" + uniqueName);
@@ -792,41 +1072,49 @@ public class AssessmentService {
         return null;
     }
 
-    private UUID ensureDefaultStudentId() {
-        Optional<Student> byCode = studentRepository.findByStudentId("ST-NEW001");
-        if (byCode.isPresent()) {
-            return byCode.get().getId();
-        }
-        List<Student> students = studentRepository.findAll();
-        if (!students.isEmpty()) {
-            return students.get(0).getId();
-        }
-        // Fallback default student
-        Student fallback = studentRepository.save(Student.builder()
-                .name("Pasindu Sri")
-                .studentId("ST-NEW001")
-                .stream("Combined Mathematics")
-                .build());
-        return fallback.getId();
+    @Transactional
+    public Assessment toggleHideAssessment(UUID id) {
+        return toggleHideAssessment(id, null);
     }
 
     @Transactional
-    public Assessment toggleHideAssessment(UUID id) {
+    public Assessment toggleHideAssessment(UUID id, User currentUser) {
         Assessment a = assessmentRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Assessment not found with id: " + id));
+        if (currentUser != null) {
+            verifyTeacherAssessmentAccess(currentUser, a);
+        }
         a.setHidden(!a.isHidden());
         return assessmentRepository.save(a);
     }
 
     @Transactional
     public Assessment updateAssessment(UUID id, QuizDto.UpdateAssessmentRequest request) {
-        Assessment a = assessmentRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Assessment not found with id: " + id));
+        return updateAssessment(id, request, null);
+    }
+
+    @Transactional
+    public Assessment updateAssessment(UUID id, QuizDto.UpdateAssessmentRequest request, User currentUser) {
+        Assessment a = lockAssessment(id);
+
+        if (currentUser != null) {
+            verifyTeacherAssessmentAccess(currentUser, a);
+        }
 
         if (request.getTitle() != null && !request.getTitle().isBlank()) {
             a.setTitle(request.getTitle().trim());
         }
         if (request.getTotalMarks() != null) {
+            if (request.getTotalMarks().signum() <= 0) throw new IllegalArgumentException("Total marks must be positive.");
+            if (request.getTotalMarks().compareTo(a.getTotalMarks()) != 0) {
+                List<Submission> submissions = submissionRepository.findByAssessmentIdAndDeletedFalseOrderBySubmittedAtDesc(id);
+                if (submissions.stream().anyMatch(s -> s.getScoreObtained() != null
+                        && s.getScoreObtained().compareTo(request.getTotalMarks()) > 0)) {
+                    throw new IllegalArgumentException("Total marks cannot be lower than an existing student's score.");
+                }
+                submissions.forEach(this::revokeResult);
+                submissionRepository.saveAll(submissions);
+            }
             a.setTotalMarks(request.getTotalMarks());
         }
         if (request.getDueDate() != null) {
@@ -844,8 +1132,18 @@ public class AssessmentService {
 
     @Transactional
     public void deleteAssessment(UUID id) {
+        deleteAssessment(id, null);
+    }
+
+    @Transactional
+    public void deleteAssessment(UUID id, User currentUser) {
         Assessment a = assessmentRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Assessment not found with id: " + id));
+
+        if (currentUser != null) {
+            verifyTeacherAssessmentAccess(currentUser, a);
+        }
+
         a.setDeleted(true);
         assessmentRepository.save(a);
     }

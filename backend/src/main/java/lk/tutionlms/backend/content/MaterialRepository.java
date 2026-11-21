@@ -14,6 +14,9 @@ public interface MaterialRepository extends JpaRepository<LearningMaterial, UUID
 
     long countByBatchIdAndDeletedFalse(UUID batchId);
 
+    @Query("SELECT m.batchId, COUNT(m) FROM LearningMaterial m WHERE m.batchId IN :batchIds AND m.deleted = false GROUP BY m.batchId")
+    List<Object[]> countMaterialsByBatchIds(@Param("batchIds") java.util.Collection<UUID> batchIds);
+
     List<LearningMaterial> findByBatchIdAndDeletedFalseOrderByCreatedAtDesc(UUID batchId);
 
     List<LearningMaterial> findByBatchIdInAndDeletedFalseOrderByCreatedAtDesc(List<UUID> batchIds);

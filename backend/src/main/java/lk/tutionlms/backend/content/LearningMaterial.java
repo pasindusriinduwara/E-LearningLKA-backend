@@ -2,13 +2,16 @@ package lk.tutionlms.backend.content;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import lk.tutionlms.backend.common.BaseEntity;
 import lombok.*;
 import java.util.UUID;
 
 @Entity
-@Table(name = "learning_materials")
+@Table(name = "learning_materials", indexes = {
+        @Index(name = "idx_materials_batch_id", columnList = "batch_id")
+})
 @Getter
 @Setter
 @NoArgsConstructor

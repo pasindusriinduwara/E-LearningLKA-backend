@@ -19,8 +19,10 @@ public class SubjectController {
     @PostMapping
     @PreAuthorize("hasRole('TEACHER')")
     public Subject create(@RequestBody Subject request) {
-        String name = request.getName() == null ? "" : request.getName().trim();
+        String name = request.getName() == null ? "" : request.getName().trim().replaceAll("\\s+", " ");
         if (name.isBlank()) throw new IllegalArgumentException("Subject name is required");
-        return subjectRepository.save(Subject.builder().name(name).active(true).build());
+        if (name.length() > 100) throw new IllegalArgumentException("Subject name cannot exceed 100 characters");
+        return subjectRepository.findByNameIgnoreCaseAndDeletedFalse(name)
+                .orElseGet(() -> subjectRepository.save(Subject.builder().name(name).active(true).build()));
     }
 }

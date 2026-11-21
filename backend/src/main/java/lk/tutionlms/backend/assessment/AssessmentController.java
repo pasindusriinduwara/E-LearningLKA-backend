@@ -13,6 +13,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import lk.tutionlms.backend.identity.User;
 
 @RestController
 @RequestMapping("/api/v1/assessments")
@@ -32,6 +35,7 @@ public class AssessmentController {
      * Upload and extract MCQ questions from a teacher-provided PDF.
      */
     @PostMapping("/parse-pdf")
+    @PreAuthorize("hasRole('TEACHER')")
     public ResponseEntity<?> parsePdf(@RequestParam("file") MultipartFile file) {
         try {
             log.info("Received PDF parse request: {}, size: {} bytes", file.getOriginalFilename(), file.getSize());
@@ -50,6 +54,7 @@ public class AssessmentController {
      * Parse raw text containing MCQs (useful for testing or copy-pasted exams).
      */
     @PostMapping("/parse-text")
+    @PreAuthorize("hasRole('TEACHER')")
     public ResponseEntity<List<QuizDto.ParsedQuestionDto>> parseText(@RequestBody QuizDto.ParseTextRequest request) {
         List<QuizDto.ParsedQuestionDto> questions = pdfParserService.parseText(request.getRawText());
         return ResponseEntity.ok(questions);
@@ -59,16 +64,21 @@ public class AssessmentController {
      * Persist confirmed and reviewed quiz questions into PostgreSQL.
      */
     @PostMapping("/quiz")
-    public ResponseEntity<?> createQuiz(@RequestBody QuizDto.CreateQuizRequest request) {
+    @PreAuthorize("hasRole('TEACHER')")
+    public ResponseEntity<?> createQuiz(
+            @RequestBody QuizDto.CreateQuizRequest request,
+            @AuthenticationPrincipal User currentUser) {
         try {
-            Assessment created = assessmentService.createQuizWithQuestions(request);
+            Assessment created = assessmentService.createQuizWithQuestions(request, currentUser);
             return ResponseEntity.status(HttpStatus.CREATED).body(created);
+        } catch (AccessDeniedException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", e.getMessage()));
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
         } catch (Exception e) {
             log.error("Error creating quiz", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("Error creating assessment: " + e.getMessage());
+                    .body(Map.of("message", "Error creating assessment: " + e.getMessage()));
         }
     }
 
@@ -76,8 +86,10 @@ public class AssessmentController {
      * Get all assessments.
      */
     @GetMapping
-    public ResponseEntity<List<QuizDto.AssessmentSummaryResponse>> getAllAssessments() {
-        return ResponseEntity.ok(assessmentService.getAllAssessments());
+    @PreAuthorize("hasRole('TEACHER')")
+    public ResponseEntity<List<QuizDto.AssessmentSummaryResponse>> getAllAssessments(
+            @AuthenticationPrincipal User currentUser) {
+        return ResponseEntity.ok(assessmentService.getAllAssessments(currentUser));
     }
 
     /**
@@ -100,7 +112,7 @@ public class AssessmentController {
             @org.springframework.security.core.annotation.AuthenticationPrincipal lk.tutionlms.backend.identity.User currentUser) {
         if (currentUser != null && ("TEACHER".equalsIgnoreCase(currentUser.getUserType())
                 || "ADMIN".equalsIgnoreCase(currentUser.getUserType()))) {
-            return ResponseEntity.ok(assessmentService.getAssessmentsByBatch(batchId));
+            return ResponseEntity.ok(assessmentService.getAssessmentsByBatch(batchId, currentUser));
         }
         return ResponseEntity.ok(assessmentService.getStudentAssessmentsByBatch(batchId, currentUser, studentId));
     }
@@ -182,15 +194,19 @@ public class AssessmentController {
      * Teacher evaluation and grading of a student's submission.
      */
     @PostMapping("/{id}/submissions/{submissionId}/grade")
+    @PreAuthorize("hasRole('TEACHER')")
     public ResponseEntity<?> gradeSubmission(
             @PathVariable UUID id,
             @PathVariable UUID submissionId,
-            @RequestBody QuizDto.GradeSubmissionRequest request) {
+            @RequestBody QuizDto.GradeSubmissionRequest request,
+            @AuthenticationPrincipal User currentUser) {
         try {
-            QuizDto.AssessmentSubmissionSummary result = assessmentService.gradeSubmission(id, submissionId, request);
+            QuizDto.AssessmentSubmissionSummary result = assessmentService.gradeSubmission(id, submissionId, request, currentUser);
             return ResponseEntity.ok(result);
+        } catch (AccessDeniedException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", e.getMessage()));
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
         }
     }
 
@@ -198,22 +214,37 @@ public class AssessmentController {
      * Upload question paper or answer sheet.
      */
     @PostMapping("/upload-paper")
-    public ResponseEntity<?> uploadPaperFile(@RequestParam("file") MultipartFile file) {
+    @PreAuthorize("hasRole('TEACHER')")
+    public ResponseEntity<?> uploadPaperFile(@RequestParam("file") MultipartFile file,
+            @AuthenticationPrincipal User currentUser) {
         try {
-            return ResponseEntity.ok(assessmentService.uploadPaperFile(file));
+            return ResponseEntity.ok(assessmentService.uploadPaperFile(file, currentUser));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(java.util.Map.of("error", e.getMessage()));
         }
+    }
+
+    @PostMapping("/{id}/upload-answer")
+    @PreAuthorize("hasRole('STUDENT')")
+    public ResponseEntity<Map<String, String>> uploadAnswer(@PathVariable UUID id,
+            @RequestParam("file") MultipartFile file, @AuthenticationPrincipal User currentUser) {
+        return ResponseEntity.ok(assessmentService.uploadAnswerFile(id, file, currentUser));
     }
 
     /**
      * Serve locally stored assessment files.
      */
     @GetMapping("/files/{filename}")
-    public ResponseEntity<org.springframework.core.io.Resource> serveFile(@PathVariable String filename) {
+    public ResponseEntity<org.springframework.core.io.Resource> serveFile(@PathVariable String filename,
+            @AuthenticationPrincipal User currentUser) {
+        assessmentService.verifyFileAccess(filename, currentUser);
         try {
-            java.nio.file.Path filePath = java.nio.file.Paths.get("uploads", "assessments").resolve(filename)
-                    .normalize();
+            java.nio.file.Path baseDir = java.nio.file.Paths.get("uploads", "assessments").toAbsolutePath().normalize();
+            java.nio.file.Path filePath = baseDir.resolve(filename).normalize();
+            if (!filePath.startsWith(baseDir)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            }
+
             org.springframework.core.io.Resource resource = new org.springframework.core.io.UrlResource(
                     filePath.toUri());
             if (resource.exists() && resource.isReadable()) {
@@ -239,11 +270,16 @@ public class AssessmentController {
      * Get all student submissions for an assessment (Teacher view).
      */
     @GetMapping("/{id}/submissions")
-    public ResponseEntity<?> getAssessmentSubmissions(@PathVariable UUID id) {
+    @PreAuthorize("hasRole('TEACHER')")
+    public ResponseEntity<?> getAssessmentSubmissions(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal User currentUser) {
         try {
-            return ResponseEntity.ok(assessmentService.getAssessmentSubmissions(id));
+            return ResponseEntity.ok(assessmentService.getAssessmentSubmissions(id, currentUser));
+        } catch (AccessDeniedException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", e.getMessage()));
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", e.getMessage()));
         }
     }
 
@@ -251,9 +287,11 @@ public class AssessmentController {
      * Get single assessment with questions and options.
      */
     @GetMapping("/{id}")
-    public ResponseEntity<?> getAssessmentById(@PathVariable UUID id) {
+    @PreAuthorize("hasRole('TEACHER')")
+    public ResponseEntity<?> getAssessmentById(@PathVariable UUID id,
+            @AuthenticationPrincipal User currentUser) {
         try {
-            return ResponseEntity.ok(assessmentService.getAssessmentById(id));
+            return ResponseEntity.ok(assessmentService.getTeacherAssessment(id, currentUser));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         }
@@ -263,10 +301,15 @@ public class AssessmentController {
      * Toggle hide/unhide visibility of an assessment for students.
      */
     @PatchMapping("/{id}/toggle-hide")
-    public ResponseEntity<?> toggleHide(@PathVariable UUID id) {
+    @PreAuthorize("hasRole('TEACHER')")
+    public ResponseEntity<?> toggleHide(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal User currentUser) {
         try {
-            Assessment updated = assessmentService.toggleHideAssessment(id);
+            Assessment updated = assessmentService.toggleHideAssessment(id, currentUser);
             return ResponseEntity.ok(updated);
+        } catch (AccessDeniedException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", e.getMessage()));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         }
@@ -276,12 +319,16 @@ public class AssessmentController {
      * Update an assessment (title, due date, marks, duration).
      */
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('TEACHER')")
     public ResponseEntity<?> updateAssessment(
             @PathVariable UUID id,
-            @RequestBody QuizDto.UpdateAssessmentRequest request) {
+            @RequestBody QuizDto.UpdateAssessmentRequest request,
+            @AuthenticationPrincipal User currentUser) {
         try {
-            Assessment updated = assessmentService.updateAssessment(id, request);
+            Assessment updated = assessmentService.updateAssessment(id, request, currentUser);
             return ResponseEntity.ok(updated);
+        } catch (AccessDeniedException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", e.getMessage()));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         }
@@ -291,10 +338,15 @@ public class AssessmentController {
      * Soft delete an assessment.
      */
     @DeleteMapping("/{id}")
-    public ResponseEntity<?> deleteAssessment(@PathVariable UUID id) {
+    @PreAuthorize("hasRole('TEACHER')")
+    public ResponseEntity<?> deleteAssessment(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal User currentUser) {
         try {
-            assessmentService.deleteAssessment(id);
+            assessmentService.deleteAssessment(id, currentUser);
             return ResponseEntity.noContent().build();
+        } catch (AccessDeniedException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", e.getMessage()));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         }

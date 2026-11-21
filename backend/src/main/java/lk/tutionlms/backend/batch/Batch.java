@@ -2,6 +2,7 @@ package lk.tutionlms.backend.batch;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import lk.tutionlms.backend.common.BaseEntity;
 import lombok.*;
@@ -9,7 +10,11 @@ import java.math.BigDecimal;
 import java.util.UUID;
 
 @Entity
-@Table(name = "batches")
+@Table(name = "batches", indexes = {
+        @Index(name = "idx_batches_teacher_id", columnList = "teacher_id"),
+        @Index(name = "idx_batches_subject_id", columnList = "subject_id"),
+        @Index(name = "idx_batches_active_deleted", columnList = "is_active, is_deleted")
+})
 @Getter
 @Setter
 @NoArgsConstructor

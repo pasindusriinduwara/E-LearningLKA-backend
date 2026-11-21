@@ -21,4 +21,5 @@ public class TeacherProfileResponse {
     private String phoneNumber;
     private String qualification;
     private String bio;
+    private String subjects;
 }

@@ -107,6 +107,8 @@ public class QuizDto {
         private int totalStudents;
         private boolean hidden;
         private boolean submitted;
+        private boolean resultPublished;
+        private LocalDateTime resultPublishedAt;
         private BigDecimal scoreObtained;
         private String grade;
         private String attachmentUrl;
@@ -206,11 +208,15 @@ public class QuizDto {
         private String title;
         private BigDecimal scoreObtained;
         private BigDecimal totalMarks;
-        private double percentage;
+        private Double percentage;
         private String grade;
-        private int correctCount;
+        private Integer correctCount;
         private int totalQuestions;
         private LocalDateTime submittedAt;
+        private String status;
+        private boolean resultPublished;
+        private LocalDateTime resultPublishedAt;
+        private String feedback;
         private List<ReviewAnswerDto> answers;
     }
 
@@ -255,6 +261,9 @@ public class QuizDto {
         private String paperUploadUrl;
         private String answerText;
         private String feedback;
+        private boolean resultPublished;
+        private LocalDateTime resultPublishedAt;
+        private Integer rank;
     }
 
     @Data

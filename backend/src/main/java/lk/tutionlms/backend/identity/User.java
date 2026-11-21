@@ -69,6 +69,6 @@ public class User extends BaseEntity implements UserDetails {
 
     @Override
     public boolean isEnabled() {
-        return "ACTIVE".equalsIgnoreCase(this.status);
+        return !isDeleted() && "ACTIVE".equalsIgnoreCase(this.status);
     }
 }

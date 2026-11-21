@@ -1,6 +1,7 @@
 package lk.tutionlms.backend.security;
 
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.io.Decoders;
@@ -18,8 +19,18 @@ import java.util.function.Function;
 @Service
 public class JwtService {
 
-    @Value("${application.security.jwt.secret-key}")
-    private String secretKey;
+    private final String secretKey;
+    private final long expirationMillis;
+
+    public JwtService(
+            @Value("${application.security.jwt.secret-key}") String secretKey,
+            @Value("${application.security.jwt.expiration:86400000}") long expirationMillis) {
+        if (expirationMillis <= 0) {
+            throw new IllegalArgumentException("JWT expiration must be greater than zero.");
+        }
+        this.secretKey = secretKey;
+        this.expirationMillis = expirationMillis;
+    }
 
     public String extractUsername(String token) {
         return extractClaim(token, Claims::getSubject);
@@ -35,26 +46,30 @@ public class JwtService {
     }
 
     public String generateToken(Map<String, Object> extraClaims, UserDetails userDetails) {
+        long issuedAt = System.currentTimeMillis();
         return Jwts.builder()
                 .setClaims(extraClaims)
                 .setSubject(userDetails.getUsername())
-                .setIssuedAt(new Date(System.currentTimeMillis()))
-                .setExpiration(new Date(System.currentTimeMillis() + 1000 * 60 * 60 * 24))
+                .setIssuedAt(new Date(issuedAt))
+                .setExpiration(new Date(Math.addExact(issuedAt, expirationMillis)))
                 .signWith(getSignInKey(), SignatureAlgorithm.HS256)
                 .compact();
     }
 
     public boolean isTokenValid(String token, UserDetails userDetails) {
-        final String username = extractUsername(token);
-        return (username.equals(userDetails.getUsername())) && !isTokenExpired(token);
-    }
-
-    private boolean isTokenExpired(String token) {
-        return extractExpiration(token).before(new Date());
-    }
-
-    private Date extractExpiration(String token) {
-        return extractClaim(token, Claims::getExpiration);
+        if (userDetails == null || !userDetails.isEnabled() || !userDetails.isAccountNonLocked()
+                || !userDetails.isAccountNonExpired() || !userDetails.isCredentialsNonExpired()) {
+            return false;
+        }
+        try {
+            Claims claims = extractAllClaims(token);
+            String username = claims.getSubject();
+            Date expiresAt = claims.getExpiration();
+            return username != null && username.equals(userDetails.getUsername())
+                    && expiresAt != null && expiresAt.after(new Date());
+        } catch (JwtException | IllegalArgumentException ex) {
+            return false;
+        }
     }
 
     private Claims extractAllClaims(String token) {

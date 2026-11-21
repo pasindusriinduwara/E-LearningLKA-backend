@@ -58,3 +58,18 @@ Restart the backend to create the new submission publication columns with the cu
 `ddl-auto=update` configuration. If automatic DDL is disabled, apply
 `backend/database/005_submission_result_publication.sql` before starting the updated backend.
 Existing submissions default to unpublished and must be explicitly released by the teacher.
+
+## Announcement access and account suspension
+
+`GET /api/v1/announcements` requires student or teacher authentication. Students receive
+announcements from their active enrollments in nondeleted batches. Teachers receive
+announcements from their own nondeleted batches plus global announcements. The student
+batch endpoint also requires active enrollment; anonymous callers cannot read announcements.
+
+Bearer-token authentication reloads the account and checks its enabled, lock, account-expiry
+and credential-expiry flags on each request. Suspending or deleting an account therefore
+blocks access through its previously issued JWTs while the account is disabled.
+
+`JWT_EXPIRATION_MS` controls the lifetime of newly issued tokens (default: `86400000`,
+24 hours) and must be positive. Existing tokens retain their original expiration, but
+account-status checks apply immediately to subsequent requests using those tokens.

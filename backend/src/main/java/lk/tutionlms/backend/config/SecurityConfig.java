@@ -106,7 +106,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/schedules/**").permitAll()
                         .requestMatchers("/api/v1/schedules/**").authenticated()
 
-                        .requestMatchers(HttpMethod.GET, "/api/v1/announcements/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/announcements/**").hasAnyRole("STUDENT", "TEACHER")
                         .requestMatchers("/api/v1/announcements/**").authenticated()
 
                         .requestMatchers(HttpMethod.GET, "/api/v1/invoices/my-invoices").hasRole("STUDENT")

@@ -9,15 +9,14 @@ import org.springframework.data.repository.query.Param;
 
 @Repository
 public interface AnnouncementRepository extends JpaRepository<Announcement, UUID> {
-    List<Announcement> findByDeletedFalse();
-
     List<Announcement> findByBatchIdAndDeletedFalseOrderByCreatedAtDesc(UUID batchId);
 
-    List<Announcement> findByBatchIdInAndDeletedFalseOrderByCreatedAtDesc(List<UUID> batchIds);
-
-    @Query("select a from Announcement a where a.deleted = false and (a.batchId in (select b.id from lk.tutionlms.backend.batch.Batch b where b.teacherId = :teacherId) or a.batchId is null)")
+    @Query("select a from Announcement a where a.deleted = false and (a.batchId in (select b.id from lk.tutionlms.backend.batch.Batch b where b.teacherId = :teacherId and b.deleted = false) or a.batchId is null) order by a.createdAt desc")
     List<Announcement> findByTeacherId(@Param("teacherId") UUID teacherId);
 
-    @Query("select a from Announcement a where a.deleted = false and a.batchId = :batchId and a.batchId in (select e.batchId from lk.tutionlms.backend.enrollment.Enrollment e where e.deleted = false and e.status = 'ACTIVE' and e.studentId in (select s.id from lk.tutionlms.backend.identity.Student s where s.userId = :userId and s.deleted = false)) order by a.createdAt desc")
+    @Query("select a from Announcement a where a.deleted = false and a.batchId in (select b.id from lk.tutionlms.backend.batch.Batch b where b.deleted = false) and a.batchId in (select e.batchId from lk.tutionlms.backend.enrollment.Enrollment e where e.deleted = false and e.status = 'ACTIVE' and e.studentId in (select s.id from lk.tutionlms.backend.identity.Student s where s.userId = :userId and s.deleted = false)) order by a.createdAt desc")
+    List<Announcement> findByStudentUserId(@Param("userId") UUID userId);
+
+    @Query("select a from Announcement a where a.deleted = false and a.batchId = :batchId and a.batchId in (select b.id from lk.tutionlms.backend.batch.Batch b where b.deleted = false) and a.batchId in (select e.batchId from lk.tutionlms.backend.enrollment.Enrollment e where e.deleted = false and e.status = 'ACTIVE' and e.studentId in (select s.id from lk.tutionlms.backend.identity.Student s where s.userId = :userId and s.deleted = false)) order by a.createdAt desc")
     List<Announcement> findByBatchIdAndStudentUserId(@Param("batchId") UUID batchId, @Param("userId") UUID userId);
 }

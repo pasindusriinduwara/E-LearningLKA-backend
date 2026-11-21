@@ -1,6 +1,7 @@
 package lk.tutionlms.backend.assessment;
 
 import lk.tutionlms.backend.assessment.dto.QuizDto;
+import lk.tutionlms.backend.assessment.dto.ResultDto;
 import lk.tutionlms.backend.batch.Batch;
 import lk.tutionlms.backend.batch.BatchRepository;
 import lk.tutionlms.backend.identity.Student;
@@ -197,17 +198,7 @@ public class AssessmentService {
                     QuizDto.AssessmentSummaryResponse summary = mapToSummary(a);
                     if (studentSubmissions.containsKey(a.getId())) {
                         Submission sub = studentSubmissions.get(a.getId());
-                        summary.setSubmitted(true);
-                        summary.setScoreObtained(sub.getScoreObtained());
-                        summary.setPaperUploadUrl(sub.getPaperUploadUrl());
-                        summary.setFeedback(sub.getFeedback());
-                        String subStatus = "GRADED".equalsIgnoreCase(sub.getStatus()) ? "Graded" : "Submitted";
-                        summary.setStatus(subStatus);
-                        if ("Graded".equals(subStatus) && sub.getScoreObtained() != null) {
-                            summary.setGrade(calculateGrade(sub.getScoreObtained(), a.getTotalMarks()));
-                        } else {
-                            summary.setGrade(null);
-                        }
+                        applyStudentResult(summary, a, sub);
                     } else {
                         summary.setSubmitted(false);
                     }
@@ -250,17 +241,7 @@ public class AssessmentService {
                     QuizDto.AssessmentSummaryResponse summary = mapToSummary(a);
                     if (studentSubmissions.containsKey(a.getId())) {
                         Submission sub = studentSubmissions.get(a.getId());
-                        summary.setSubmitted(true);
-                        summary.setScoreObtained(sub.getScoreObtained());
-                        summary.setPaperUploadUrl(sub.getPaperUploadUrl());
-                        summary.setFeedback(sub.getFeedback());
-                        String subStatus = "GRADED".equalsIgnoreCase(sub.getStatus()) ? "Graded" : "Submitted";
-                        summary.setStatus(subStatus);
-                        if ("Graded".equals(subStatus) && sub.getScoreObtained() != null) {
-                            summary.setGrade(calculateGrade(sub.getScoreObtained(), a.getTotalMarks()));
-                        } else {
-                            summary.setGrade(null);
-                        }
+                        applyStudentResult(summary, a, sub);
                     } else {
                         summary.setSubmitted(false);
                     }
@@ -381,7 +362,7 @@ public class AssessmentService {
             QuizDto.QuizSubmissionRequest request,
             User currentUser) {
 
-        Assessment assessment = getAssessmentById(assessmentId);
+        Assessment assessment = lockAssessment(assessmentId);
 
         UUID studentId = resolveStudentId(currentUser, request != null ? request.getStudentId() : null);
         if (studentId == null) {
@@ -490,6 +471,14 @@ public class AssessmentService {
     }
 
     private QuizDto.QuizSubmissionResultResponse buildSubmissionResult(Assessment assessment, Submission submission) {
+        if (!isResultVisible(submission)) {
+            return QuizDto.QuizSubmissionResultResponse.builder()
+                    .submissionId(submission.getId()).assessmentId(assessment.getId()).title(assessment.getTitle())
+                    .totalMarks(assessment.getTotalMarks()).submittedAt(submission.getSubmittedAt())
+                    .status(submission.getStatus()).resultPublished(false)
+                    .totalQuestions(assessment.getQuestions() != null ? assessment.getQuestions().size() : 0)
+                    .answers(List.of()).build();
+        }
         BigDecimal score = submission.getScoreObtained() != null ? submission.getScoreObtained() : BigDecimal.ZERO;
         BigDecimal totalMarks = assessment.getTotalMarks() != null && assessment.getTotalMarks().compareTo(BigDecimal.ZERO) > 0
                 ? assessment.getTotalMarks()
@@ -553,6 +542,10 @@ public class AssessmentService {
                 .correctCount(correctCount)
                 .totalQuestions(assessment.getQuestions() != null ? assessment.getQuestions().size() : 0)
                 .submittedAt(submission.getSubmittedAt())
+                .status(submission.getStatus())
+                .resultPublished(true)
+                .resultPublishedAt(submission.getResultPublishedAt())
+                .feedback(submission.getFeedback())
                 .answers(reviewAnswers)
                 .build();
     }
@@ -612,6 +605,8 @@ public class AssessmentService {
                     .paperUploadUrl(s.getPaperUploadUrl())
                     .answerText(answerText)
                     .feedback(s.getFeedback())
+                    .resultPublished(isResultVisible(s))
+                    .resultPublishedAt(s.getResultPublishedAt())
                     .build();
         }).collect(Collectors.toList());
     }
@@ -625,7 +620,7 @@ public class AssessmentService {
             QuizDto.EssaySubmissionRequest request,
             User currentUser) {
 
-        Assessment assessment = getAssessmentById(assessmentId);
+        Assessment assessment = lockAssessment(assessmentId);
         boolean hasFile = request != null && request.getPaperUploadUrl() != null && !request.getPaperUploadUrl().isBlank();
         boolean hasText = request != null && request.getAnswerText() != null && !request.getAnswerText().isBlank();
         UUID studentId = validateEssaySubmission(assessment, currentUser, hasFile);
@@ -691,11 +686,10 @@ public class AssessmentService {
                 .submissionId(submission.getId())
                 .assessmentId(assessmentId)
                 .title(assessment.getTitle())
-                .scoreObtained(BigDecimal.ZERO)
+                .scoreObtained(null)
                 .totalMarks(assessment.getTotalMarks())
-                .percentage(0.0)
-                .grade("Submitted")
-                .correctCount(0)
+                .status("SUBMITTED")
+                .resultPublished(false)
                 .totalQuestions(1)
                 .submittedAt(submission.getSubmittedAt())
                 .answers(new ArrayList<>())
@@ -720,7 +714,7 @@ public class AssessmentService {
             QuizDto.GradeSubmissionRequest request,
             User currentUser) {
 
-        Assessment assessment = getAssessmentById(assessmentId);
+        Assessment assessment = lockAssessment(assessmentId);
         if (currentUser != null) {
             verifyTeacherAssessmentAccess(currentUser, assessment);
         }
@@ -732,9 +726,15 @@ public class AssessmentService {
             throw new IllegalArgumentException("Submission does not belong to the specified assessment.");
         }
 
+        if (request == null || request.getScoreObtained() == null
+                || request.getScoreObtained().compareTo(BigDecimal.ZERO) < 0
+                || request.getScoreObtained().compareTo(assessment.getTotalMarks()) > 0) {
+            throw new IllegalArgumentException("Marks must be between zero and the assessment's total marks.");
+        }
         submission.setScoreObtained(request.getScoreObtained());
         submission.setFeedback(request.getFeedback());
         submission.setStatus("GRADED");
+        revokeResult(submission);
         submission = submissionRepository.save(submission);
 
         String grade = calculateGrade(submission.getScoreObtained(), assessment.getTotalMarks());
@@ -763,7 +763,119 @@ public class AssessmentService {
                 .paperUploadUrl(submission.getPaperUploadUrl())
                 .answerText(answerText)
                 .feedback(submission.getFeedback())
+                .resultPublished(false)
                 .build();
+    }
+
+    private boolean isResultVisible(Submission submission) {
+        return submission.isResultPublished() && "GRADED".equalsIgnoreCase(submission.getStatus())
+                && submission.getScoreObtained() != null;
+    }
+
+    private void applyStudentResult(QuizDto.AssessmentSummaryResponse summary, Assessment assessment, Submission submission) {
+        boolean visible = isResultVisible(submission);
+        summary.setSubmitted(true);
+        summary.setResultPublished(visible);
+        summary.setResultPublishedAt(visible ? submission.getResultPublishedAt() : null);
+        summary.setPaperUploadUrl(submission.getPaperUploadUrl());
+        summary.setScoreObtained(visible ? submission.getScoreObtained() : null);
+        summary.setFeedback(visible ? submission.getFeedback() : null);
+        summary.setGrade(visible ? calculateGrade(submission.getScoreObtained(), assessment.getTotalMarks()) : null);
+        summary.setStatus(visible ? "Graded" : "GRADED".equalsIgnoreCase(submission.getStatus())
+                ? "Awaiting publication" : "Submitted");
+    }
+
+    private Assessment lockAssessment(UUID id) {
+        return assessmentRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new IllegalArgumentException("Assessment not found."));
+    }
+
+    private void revokeResult(Submission submission) {
+        submission.setResultPublished(false);
+        submission.setResultPublishedAt(null);
+        submission.setResultPublishedBy(null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ResultDto.Summary> getTeacherResults(User user) {
+        return getAllAssessments(user).stream().map(summary -> resultSummary(summary,
+                submissionRepository.findByAssessmentIdAndDeletedFalseOrderBySubmittedAtDesc(summary.getId()))).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public ResultDto.Detail getTeacherResultDetail(UUID id, User user) {
+        Assessment assessment = getTeacherAssessment(id, user);
+        List<Submission> submissions = submissionRepository.findByAssessmentIdAndDeletedFalseOrderBySubmittedAtDesc(id);
+        List<QuizDto.AssessmentSubmissionSummary> rows = getAssessmentSubmissions(id, user);
+        List<QuizDto.AssessmentSubmissionSummary> ranked = rows.stream()
+                .filter(row -> "Graded".equals(row.getStatus()) && row.getMarks() != null)
+                .sorted(Comparator.comparing(QuizDto.AssessmentSubmissionSummary::getMarks).reversed()).toList();
+        BigDecimal previous = null;
+        int rank = 0;
+        for (int i = 0; i < ranked.size(); i++) {
+            if (previous == null || previous.compareTo(ranked.get(i).getMarks()) != 0) rank = i + 1;
+            ranked.get(i).setRank(rank);
+            previous = ranked.get(i).getMarks();
+        }
+        rows.sort(Comparator.comparing(QuizDto.AssessmentSubmissionSummary::getRank,
+                Comparator.nullsLast(Comparator.naturalOrder()))
+                .thenComparing(QuizDto.AssessmentSubmissionSummary::getStudentName));
+        return new ResultDto.Detail(resultSummary(mapToSummary(assessment), submissions), rows);
+    }
+
+    @Transactional
+    public ResultDto.Detail publishResults(UUID id, User user) {
+        Assessment assessment = lockAssessment(id);
+        verifyTeacherAssessmentAccess(user, assessment);
+        List<Submission> submissions = submissionRepository.findByAssessmentIdAndDeletedFalseOrderBySubmittedAtDesc(id);
+        List<Submission> graded = submissions.stream().filter(s -> "GRADED".equalsIgnoreCase(s.getStatus())
+                && s.getScoreObtained() != null).toList();
+        if (graded.isEmpty()) throw new IllegalArgumentException("Grade at least one submission before publishing results.");
+        for (Submission submission : graded) {
+            if (submission.getScoreObtained().signum() < 0
+                    || submission.getScoreObtained().compareTo(assessment.getTotalMarks()) > 0) {
+                throw new IllegalArgumentException("Correct invalid marks before publishing results.");
+            }
+        }
+        LocalDateTime now = LocalDateTime.now();
+        for (Submission submission : graded) {
+            if (!submission.isResultPublished()) {
+                submission.setResultPublished(true);
+                submission.setResultPublishedAt(now);
+                submission.setResultPublishedBy(user.getId());
+            }
+        }
+        submissionRepository.saveAllAndFlush(graded);
+        return getTeacherResultDetail(id, user);
+    }
+
+    @Transactional
+    public ResultDto.Detail unpublishResults(UUID id, User user) {
+        Assessment assessment = lockAssessment(id);
+        verifyTeacherAssessmentAccess(user, assessment);
+        List<Submission> submissions = submissionRepository.findByAssessmentIdAndDeletedFalseOrderBySubmittedAtDesc(id);
+        submissions.forEach(this::revokeResult);
+        submissionRepository.saveAllAndFlush(submissions);
+        return getTeacherResultDetail(id, user);
+    }
+
+    private ResultDto.Summary resultSummary(QuizDto.AssessmentSummaryResponse assessment, List<Submission> submissions) {
+        List<Submission> graded = submissions.stream().filter(s -> "GRADED".equalsIgnoreCase(s.getStatus())
+                && s.getScoreObtained() != null).toList();
+        BigDecimal total = graded.stream().map(Submission::getScoreObtained).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal highest = graded.stream().map(Submission::getScoreObtained).max(BigDecimal::compareTo).orElse(null);
+        BigDecimal average = graded.isEmpty() ? null : total.divide(BigDecimal.valueOf(graded.size()), 2, RoundingMode.HALF_UP);
+        long passed = graded.stream().filter(s -> s.getScoreObtained().compareTo(
+                assessment.getTotalMarks().multiply(new BigDecimal("0.4"))) >= 0).count();
+        BigDecimal passRate = graded.isEmpty() ? null : BigDecimal.valueOf(passed * 100)
+                .divide(BigDecimal.valueOf(graded.size()), 1, RoundingMode.HALF_UP);
+        LocalDateTime lastPublished = submissions.stream().filter(this::isResultVisible)
+                .map(Submission::getResultPublishedAt).filter(Objects::nonNull).max(LocalDateTime::compareTo).orElse(null);
+        return new ResultDto.Summary(assessment.getId(), assessment.getBatchId(), assessment.getBatchName(),
+                assessment.getTitle(), assessment.getAssessmentType(), assessment.getTotalMarks(), submissions.size(),
+                graded.size(), (int) submissions.stream().filter(this::isResultVisible).count(),
+                enrollmentRepository.countByBatchIdAndStatusAndDeletedFalse(assessment.getBatchId(), "ACTIVE"),
+                average, highest, passRate, lastPublished);
     }
 
     /**
@@ -983,8 +1095,7 @@ public class AssessmentService {
 
     @Transactional
     public Assessment updateAssessment(UUID id, QuizDto.UpdateAssessmentRequest request, User currentUser) {
-        Assessment a = assessmentRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Assessment not found with id: " + id));
+        Assessment a = lockAssessment(id);
 
         if (currentUser != null) {
             verifyTeacherAssessmentAccess(currentUser, a);
@@ -994,6 +1105,16 @@ public class AssessmentService {
             a.setTitle(request.getTitle().trim());
         }
         if (request.getTotalMarks() != null) {
+            if (request.getTotalMarks().signum() <= 0) throw new IllegalArgumentException("Total marks must be positive.");
+            if (request.getTotalMarks().compareTo(a.getTotalMarks()) != 0) {
+                List<Submission> submissions = submissionRepository.findByAssessmentIdAndDeletedFalseOrderBySubmittedAtDesc(id);
+                if (submissions.stream().anyMatch(s -> s.getScoreObtained() != null
+                        && s.getScoreObtained().compareTo(request.getTotalMarks()) > 0)) {
+                    throw new IllegalArgumentException("Total marks cannot be lower than an existing student's score.");
+                }
+                submissions.forEach(this::revokeResult);
+                submissionRepository.saveAll(submissions);
+            }
             a.setTotalMarks(request.getTotalMarks());
         }
         if (request.getDueDate() != null) {

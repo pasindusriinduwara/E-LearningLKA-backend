@@ -39,6 +39,16 @@ public class Submission extends BaseEntity {
     @Column(columnDefinition = "TEXT")
     private String feedback;
 
+    @Column(name = "result_published", nullable = false, columnDefinition = "boolean default false")
+    @Builder.Default
+    private boolean resultPublished = false;
+
+    @Column(name = "result_published_at")
+    private LocalDateTime resultPublishedAt;
+
+    @Column(name = "result_published_by")
+    private UUID resultPublishedBy;
+
     @Column(length = 20, nullable = false)
     @Builder.Default
     private String status = "GRADED";

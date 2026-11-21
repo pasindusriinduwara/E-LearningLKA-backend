@@ -64,4 +64,22 @@ class AssessmentSecurityTests {
         verify(service).uploadAnswerFile(eq(id), any(), any());
         verify(service, never()).uploadPaperFile(any(), any());
     }
+
+    @Test
+    void onlyTeachersCanAccessPublicationRoutes() throws Exception {
+        User student = principal("STUDENT");
+        String path = "/api/v1/results/" + UUID.randomUUID();
+        mvc.perform(get("/api/v1/results").with(user(student))).andExpect(status().isForbidden());
+        mvc.perform(get(path).with(user(student))).andExpect(status().isForbidden());
+        mvc.perform(post(path + "/publish").with(user(student))).andExpect(status().isForbidden());
+        mvc.perform(post(path + "/unpublish").with(user(student))).andExpect(status().isForbidden());
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void publicationOwnershipErrorsReturnForbidden() throws Exception {
+        when(service.publishResults(any(), any())).thenThrow(new AccessDeniedException("Other teacher's assessment"));
+        mvc.perform(post("/api/v1/results/" + UUID.randomUUID() + "/publish").with(user(principal("TEACHER"))))
+                .andExpect(status().isForbidden());
+    }
 }

@@ -2,6 +2,7 @@ package lk.tutionlms.backend.assessment;
 
 import com.cloudinary.Cloudinary;
 import com.cloudinary.Uploader;
+import lk.tutionlms.backend.assessment.dto.QuizDto;
 import lk.tutionlms.backend.batch.Batch;
 import lk.tutionlms.backend.batch.BatchRepository;
 import lk.tutionlms.backend.enrollment.EnrollmentRepository;
@@ -78,6 +79,53 @@ class AssessmentAccessTests {
         assertTrue(service.getAllAssessments(teacherUser).isEmpty());
         verify(assessments).findByBatchIdInAndDeletedFalseOrderByCreatedAtDesc(List.of(batchId));
         verify(assessments, never()).findByDeletedFalseOrderByCreatedAtDesc();
+    }
+
+    @Test
+    void teacherCanCreateAQuizInTheirOwnBatchUsingTheirProfileId() {
+        // User IDs and teacher profile IDs are separate identifiers.
+        assertNotEquals(teacherUser.getId(), teacher.getId());
+        when(teachers.findByUserId(teacherUser.getId())).thenReturn(Optional.of(teacher));
+        Batch ownBatch = new Batch();
+        ownBatch.setId(batchId);
+        ownBatch.setTeacherId(teacher.getId());
+        when(batches.existsById(batchId)).thenReturn(true);
+        when(batches.findById(batchId)).thenReturn(Optional.of(ownBatch));
+        when(assessments.save(any(Assessment.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        QuizDto.CreateQuizRequest request = QuizDto.CreateQuizRequest.builder()
+                .batchId(batchId).title("Imported quiz")
+                .questions(List.of(QuizDto.QuestionInputDto.builder()
+                        .questionText("Which planet is known as the Red Planet?")
+                        .options(List.of(
+                                QuizDto.OptionInputDto.builder().optionText("Venus").build(),
+                                QuizDto.OptionInputDto.builder().optionText("Mars").isCorrect(true).build()))
+                        .build()))
+                .build();
+
+        Assessment saved = service.createQuizWithQuestions(request, teacherUser);
+
+        assertEquals(batchId, saved.getBatchId());
+        assertEquals("Imported quiz", saved.getTitle());
+        assertEquals(1, saved.getQuestions().size());
+        assertEquals(2, saved.getQuestions().getFirst().getOptions().size());
+        assertTrue(saved.getQuestions().getFirst().getOptions().get(1).isCorrect());
+        verify(assessments, times(2)).save(saved);
+    }
+
+    @Test
+    void teacherCannotCreateAQuizInAnotherTeachersBatch() {
+        when(teachers.findByUserId(teacherUser.getId())).thenReturn(Optional.of(teacher));
+        Batch foreignBatch = new Batch();
+        foreignBatch.setId(batchId);
+        foreignBatch.setTeacherId(UUID.randomUUID());
+        when(batches.existsById(batchId)).thenReturn(true);
+        when(batches.findById(batchId)).thenReturn(Optional.of(foreignBatch));
+        QuizDto.CreateQuizRequest request = QuizDto.CreateQuizRequest.builder()
+                .batchId(batchId).title("Imported quiz").build();
+
+        assertThrows(AccessDeniedException.class, () -> service.createQuizWithQuestions(request, teacherUser));
+
+        verify(assessments, never()).save(any(Assessment.class));
     }
 
     @Test

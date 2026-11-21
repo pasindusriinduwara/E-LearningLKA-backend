@@ -32,3 +32,21 @@ With the current `ddl-auto=update` configuration Hibernate creates this table. I
 DDL is disabled, apply `backend/database/004_assessment_file_ownership.sql` before starting
 the updated backend. Existing linked local files remain readable through assessment/submission
 ownership checks; unlinked legacy uploads without ownership metadata must be uploaded again.
+
+## Assessment result publication
+
+Teachers use the Results page to select a batch and assessment, review or save grades,
+and publish all graded results for that assessment. Ungraded submissions stay private.
+Students see only their own published marks, feedback and quiz answer review; submitting
+a quiz does not immediately release its automatic grade. Regrading or changing an
+assessment's total marks makes affected results private until the teacher publishes again.
+Unpublish hides released results while retaining saved grades and answers.
+
+Teacher-only endpoints: `GET /api/v1/results`, `GET /api/v1/results/{id}`,
+`POST /api/v1/results/{id}/publish`, and `POST /api/v1/results/{id}/unpublish`.
+Every endpoint is restricted to the logged-in teacher's batches.
+
+Restart the backend to create the new submission publication columns with the current
+`ddl-auto=update` configuration. If automatic DDL is disabled, apply
+`backend/database/005_submission_result_publication.sql` before starting the updated backend.
+Existing submissions default to unpublished and must be explicitly released by the teacher.

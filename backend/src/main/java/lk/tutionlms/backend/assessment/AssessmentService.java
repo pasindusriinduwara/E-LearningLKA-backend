@@ -34,6 +34,7 @@ public class AssessmentService {
     private final EnrollmentRepository enrollmentRepository;
     private final TeacherRepository teacherRepository;
     private final Cloudinary cloudinary;
+    private final AssessmentFileRepository assessmentFileRepository;
 
     @Autowired
     public AssessmentService(
@@ -44,6 +45,7 @@ public class AssessmentService {
             StudentRepository studentRepository,
             EnrollmentRepository enrollmentRepository,
             TeacherRepository teacherRepository,
+            AssessmentFileRepository assessmentFileRepository,
             @Autowired(required = false) Cloudinary cloudinary) {
         this.assessmentRepository = assessmentRepository;
         this.questionRepository = questionRepository;
@@ -53,6 +55,7 @@ public class AssessmentService {
         this.enrollmentRepository = enrollmentRepository;
         this.teacherRepository = teacherRepository;
         this.cloudinary = cloudinary;
+        this.assessmentFileRepository = assessmentFileRepository;
     }
 
     public void verifyTeacherAssessmentAccess(User currentUser, Assessment assessment) {
@@ -61,6 +64,9 @@ public class AssessmentService {
         }
         if ("ADMIN".equalsIgnoreCase(currentUser.getUserType())) {
             return;
+        }
+        if (!"TEACHER".equalsIgnoreCase(currentUser.getUserType()) || assessment.getBatchId() == null) {
+            throw new AccessDeniedException("Teacher access to an owned batch is required.");
         }
         Teacher teacher = teacherRepository.findByUserId(currentUser.getId())
                 .orElseThrow(() -> new AccessDeniedException("Teacher profile not found for user."));
@@ -83,6 +89,7 @@ public class AssessmentService {
         if (request.getTitle() == null || request.getTitle().isBlank()) {
             throw new IllegalArgumentException("Assessment title is required");
         }
+        verifyUploadedFileOwner(request.getAttachmentUrl(), currentUser, null, false);
 
         UUID targetBatchId = request.getBatchId();
         if (targetBatchId == null || !batchRepository.existsById(targetBatchId)) {
@@ -152,8 +159,16 @@ public class AssessmentService {
     }
 
     @Transactional(readOnly = true)
-    public List<QuizDto.AssessmentSummaryResponse> getAllAssessments() {
-        return assessmentRepository.findByDeletedFalseOrderByCreatedAtDesc()
+    public List<QuizDto.AssessmentSummaryResponse> getAllAssessments(User currentUser) {
+        if (currentUser == null || !"TEACHER".equalsIgnoreCase(currentUser.getUserType())) {
+            throw new AccessDeniedException("Teacher authentication required.");
+        }
+        Teacher teacher = teacherRepository.findByUserId(currentUser.getId())
+                .orElseThrow(() -> new AccessDeniedException("Teacher profile not found."));
+        List<UUID> batchIds = batchRepository.findByTeacherIdAndDeletedFalse(teacher.getId())
+                .stream().map(Batch::getId).toList();
+        if (batchIds.isEmpty()) return List.of();
+        return assessmentRepository.findByBatchIdInAndDeletedFalseOrderByCreatedAtDesc(batchIds)
                 .stream()
                 .map(this::mapToSummary)
                 .collect(Collectors.toList());
@@ -202,7 +217,9 @@ public class AssessmentService {
     }
 
     @Transactional(readOnly = true)
-    public List<QuizDto.AssessmentSummaryResponse> getAssessmentsByBatch(UUID batchId) {
+    public List<QuizDto.AssessmentSummaryResponse> getAssessmentsByBatch(UUID batchId, User currentUser) {
+        Assessment scope = Assessment.builder().batchId(batchId).build();
+        verifyTeacherAssessmentAccess(currentUser, scope);
         return assessmentRepository.findByBatchIdAndDeletedFalseOrderByCreatedAtDesc(batchId)
                 .stream()
                 .map(this::mapToSummary)
@@ -264,6 +281,13 @@ public class AssessmentService {
                 }
             }
         }
+        return assessment;
+    }
+
+    @Transactional(readOnly = true)
+    public Assessment getTeacherAssessment(UUID id, User currentUser) {
+        Assessment assessment = getAssessmentById(id);
+        verifyTeacherAssessmentAccess(currentUser, assessment);
         return assessment;
     }
 
@@ -602,16 +626,14 @@ public class AssessmentService {
             User currentUser) {
 
         Assessment assessment = getAssessmentById(assessmentId);
-
-        UUID studentId = resolveStudentId(currentUser, request != null ? request.getStudentId() : null);
-        if (studentId == null) {
-            throw new AccessDeniedException("Access denied: Authenticated student identity could not be verified.");
+        boolean hasFile = request != null && request.getPaperUploadUrl() != null && !request.getPaperUploadUrl().isBlank();
+        boolean hasText = request != null && request.getAnswerText() != null && !request.getAnswerText().isBlank();
+        UUID studentId = validateEssaySubmission(assessment, currentUser, hasFile);
+        if (!hasFile && !hasText) throw new IllegalArgumentException("An answer is required.");
+        if ("FILE_UPLOAD".equalsIgnoreCase(assessment.getSubmissionType()) && !hasFile) {
+            throw new IllegalArgumentException("Please upload an answer file for this assessment.");
         }
-
-        // Industrial Standard Guard: Verify student is actively enrolled in this assessment's batch
-        if (assessment.getBatchId() != null && !enrollmentRepository.isStudentActiveInBatch(studentId, assessment.getBatchId())) {
-            throw new AccessDeniedException("Access denied: You are not enrolled in the class for this assessment.");
-        }
+        verifyUploadedFileOwner(request.getPaperUploadUrl(), currentUser, assessmentId, true);
 
         Optional<Submission> existing = submissionRepository.findByAssessmentAndStudentWithAnswers(assessmentId, studentId);
         Submission submission;
@@ -747,9 +769,105 @@ public class AssessmentService {
     /**
      * Upload question paper or answer sheet.
      */
-    public Map<String, String> uploadPaperFile(MultipartFile file) {
+    @Transactional
+    public Map<String, String> uploadPaperFile(MultipartFile file, User currentUser) {
+        if (currentUser == null || !"TEACHER".equalsIgnoreCase(currentUser.getUserType())) {
+            throw new AccessDeniedException("Teacher authentication required.");
+        }
+        return storePaperFile(file, currentUser, null, false);
+    }
+
+    @Transactional
+    public Map<String, String> uploadAnswerFile(UUID assessmentId, MultipartFile file, User currentUser) {
+        Assessment assessment = getAssessmentById(assessmentId);
+        validateEssaySubmission(assessment, currentUser, true);
+        return storePaperFile(file, currentUser, assessmentId, true);
+    }
+
+    private UUID validateEssaySubmission(Assessment assessment, User currentUser, boolean fileUpload) {
+        if (currentUser == null || !"STUDENT".equalsIgnoreCase(currentUser.getUserType())) {
+            throw new AccessDeniedException("Student authentication required.");
+        }
+        UUID studentId = studentRepository.findByUserId(currentUser.getId()).map(Student::getId)
+                .orElseThrow(() -> new AccessDeniedException("Student profile not found."));
+        if (assessment.getBatchId() == null
+                || !enrollmentRepository.isStudentActiveInBatch(studentId, assessment.getBatchId())) {
+            throw new AccessDeniedException("You are not enrolled in this assessment's batch.");
+        }
+        if (assessment.isHidden() || assessment.isDeleted()
+                || (assessment.getDueDate() != null && assessment.getDueDate().isBefore(LocalDateTime.now()))) {
+            throw new IllegalArgumentException("This assessment is not accepting submissions.");
+        }
+        if ("MCQ_QUIZ".equalsIgnoreCase(assessment.getAssessmentType())) {
+            throw new IllegalArgumentException("Use the quiz submission endpoint for MCQ quizzes.");
+        }
+        if (fileUpload && "TEXT".equalsIgnoreCase(assessment.getSubmissionType())) {
+            throw new IllegalArgumentException("This assessment accepts text answers only.");
+        }
+        submissionRepository.findByAssessmentIdAndStudentIdAndDeletedFalse(assessment.getId(), studentId)
+                .filter(s -> "GRADED".equalsIgnoreCase(s.getStatus()))
+                .ifPresent(s -> { throw new IllegalArgumentException("A graded submission cannot be replaced."); });
+        return studentId;
+    }
+
+    @Transactional(readOnly = true)
+    public void verifyFileAccess(String filename, User currentUser) {
+        if (currentUser == null || filename.contains("/") || filename.contains("\\") || filename.contains("..")) {
+            throw new AccessDeniedException("File access denied.");
+        }
+        Optional<AssessmentFile> stored = assessmentFileRepository.findByFilenameAndDeletedFalse(filename);
+        if (stored.isPresent() && stored.get().getUploadedBy().equals(currentUser.getId())) return;
+        if (stored.isPresent() && stored.get().isAnswerSheet() && stored.get().getAssessmentId() != null) {
+            verifyTeacherAssessmentAccess(currentUser, getAssessmentById(stored.get().getAssessmentId()));
+            return;
+        }
+        String url = "/api/v1/assessments/files/" + filename;
+        for (Assessment assessment : assessmentRepository.findByAttachmentUrlAndDeletedFalse(url)) {
+            if (canReadAssessmentFile(assessment, currentUser)) return;
+        }
+        for (Submission submission : submissionRepository.findByPaperUploadUrlAndDeletedFalse(url)) {
+            if (studentRepository.findByUserId(currentUser.getId())
+                    .map(s -> s.getId().equals(submission.getStudentId())).orElse(false)) return;
+            if (isAssessmentTeacher(getAssessmentById(submission.getAssessmentId()), currentUser)) return;
+        }
+        throw new AccessDeniedException("File access denied.");
+    }
+
+    private boolean canReadAssessmentFile(Assessment assessment, User user) {
+        if (isAssessmentTeacher(assessment, user)) return true;
+        return "STUDENT".equalsIgnoreCase(user.getUserType()) && !assessment.isHidden()
+                && studentRepository.findByUserId(user.getId())
+                    .map(s -> enrollmentRepository.isStudentActiveInBatch(s.getId(), assessment.getBatchId()))
+                    .orElse(false);
+    }
+
+    private boolean isAssessmentTeacher(Assessment assessment, User user) {
+        if (!"TEACHER".equalsIgnoreCase(user.getUserType())) return false;
+        try {
+            verifyTeacherAssessmentAccess(user, assessment);
+            return true;
+        } catch (AccessDeniedException | IllegalArgumentException ex) {
+            return false;
+        }
+    }
+
+    private void verifyUploadedFileOwner(String url, User user, UUID assessmentId, boolean answerSheet) {
+        String prefix = "/api/v1/assessments/files/";
+        if (url == null || !url.startsWith(prefix)) return;
+        AssessmentFile file = assessmentFileRepository.findByFilenameAndDeletedFalse(url.substring(prefix.length()))
+                .orElseThrow(() -> new AccessDeniedException("Uploaded file ownership could not be verified."));
+        if (user == null || !file.getUploadedBy().equals(user.getId()) || file.isAnswerSheet() != answerSheet
+                || !Objects.equals(file.getAssessmentId(), assessmentId)) {
+            throw new AccessDeniedException("This uploaded file does not belong to the current submission.");
+        }
+    }
+
+    private Map<String, String> storePaperFile(MultipartFile file, User currentUser, UUID assessmentId, boolean answerSheet) {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("File cannot be empty");
+        }
+        if (file.getSize() > 20 * 1024 * 1024) {
+            throw new IllegalArgumentException("File must be 20 MB or smaller.");
         }
         String originalName = file.getOriginalFilename() != null ? file.getOriginalFilename() : "paper.pdf";
         try {
@@ -782,7 +900,20 @@ public class AssessmentService {
             }
             String uniqueName = UUID.randomUUID() + "_" + originalName.replaceAll("[^a-zA-Z0-9.-]", "_");
             java.nio.file.Path targetPath = uploadDir.resolve(uniqueName);
-            java.nio.file.Files.copy(file.getInputStream(), targetPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            try (java.io.InputStream input = file.getInputStream()) {
+                java.nio.file.Files.copy(input, targetPath);
+            }
+            AssessmentFile stored = new AssessmentFile();
+            stored.setFilename(uniqueName);
+            stored.setUploadedBy(currentUser.getId());
+            stored.setAssessmentId(assessmentId);
+            stored.setAnswerSheet(answerSheet);
+            try {
+                assessmentFileRepository.saveAndFlush(stored);
+            } catch (RuntimeException ex) {
+                java.nio.file.Files.deleteIfExists(targetPath);
+                throw ex;
+            }
 
             Map<String, String> response = new HashMap<>();
             response.put("url", "/api/v1/assessments/files/" + uniqueName);

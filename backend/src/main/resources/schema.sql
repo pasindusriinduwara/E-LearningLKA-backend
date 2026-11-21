@@ -360,4 +360,26 @@ CREATE TABLE IF NOT EXISTS public.announcements
     CONSTRAINT announcements_pkey PRIMARY KEY (id)
 );
 
+-- Foreign Key and Performance Indexes
+CREATE INDEX IF NOT EXISTS idx_batches_teacher_id ON public.batches(teacher_id);
+CREATE INDEX IF NOT EXISTS idx_batches_subject_id ON public.batches(subject_id);
+CREATE INDEX IF NOT EXISTS idx_batches_active_deleted ON public.batches(is_active, is_deleted);
+
+CREATE INDEX IF NOT EXISTS idx_enrollments_batch_status ON public.enrollments(batch_id, status, is_deleted);
+CREATE INDEX IF NOT EXISTS idx_enrollments_student_status ON public.enrollments(student_id, status, is_deleted);
+
+CREATE INDEX IF NOT EXISTS idx_enrollment_requests_student ON public.enrollment_requests(student_id, is_deleted);
+CREATE INDEX IF NOT EXISTS idx_enrollment_requests_batch ON public.enrollment_requests(batch_id, is_deleted);
+
+CREATE INDEX IF NOT EXISTS idx_materials_batch_deleted ON public.learning_materials(batch_id, is_deleted);
+
+CREATE INDEX IF NOT EXISTS idx_class_schedules_batch_deleted ON public.class_schedules(batch_id, is_deleted);
+
+CREATE INDEX IF NOT EXISTS idx_invoices_student_deleted ON public.invoices(student_id, is_deleted);
+CREATE INDEX IF NOT EXISTS idx_invoices_batch_deleted ON public.invoices(batch_id, is_deleted);
+
+CREATE INDEX IF NOT EXISTS idx_assessments_batch_deleted ON public.assessments(batch_id, is_deleted);
+CREATE INDEX IF NOT EXISTS idx_submissions_assessment_deleted ON public.submissions(assessment_id, is_deleted);
+CREATE INDEX IF NOT EXISTS idx_submissions_student_deleted ON public.submissions(student_id, is_deleted);
+
 COMMIT;

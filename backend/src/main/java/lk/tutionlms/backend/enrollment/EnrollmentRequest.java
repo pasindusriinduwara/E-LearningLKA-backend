@@ -2,12 +2,18 @@ package lk.tutionlms.backend.enrollment;
 
 import jakarta.persistence.*;
 import lombok.Data;
+import org.hibernate.annotations.SQLRestriction;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "enrollment_requests")
+@Table(name = "enrollment_requests", indexes = {
+        @Index(name = "idx_enrollment_req_student", columnList = "student_id"),
+        @Index(name = "idx_enrollment_req_batch", columnList = "batch_id"),
+        @Index(name = "idx_enrollment_req_status", columnList = "status")
+})
 @Data
+@SQLRestriction("is_deleted = false")
 public class EnrollmentRequest {
 
     @Id

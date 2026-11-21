@@ -20,6 +20,9 @@ public interface EnrollmentRepository extends JpaRepository<Enrollment, UUID> {
 
     long countByBatchIdAndStatusAndDeletedFalse(UUID batchId, String status);
 
+    @Query("SELECT e.batchId, COUNT(e) FROM Enrollment e WHERE e.batchId IN :batchIds AND e.status = 'ACTIVE' AND e.deleted = false GROUP BY e.batchId")
+    List<Object[]> countActiveEnrollmentsByBatchIds(@Param("batchIds") java.util.Collection<UUID> batchIds);
+
     @Query("SELECT e.batchId FROM Enrollment e WHERE e.studentId = :studentId AND e.status = 'ACTIVE' AND e.deleted = false")
     List<UUID> findActiveBatchIdsByStudentId(@Param("studentId") UUID studentId);
 

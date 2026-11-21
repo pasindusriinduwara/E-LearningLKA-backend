@@ -16,6 +16,8 @@ public interface SubmissionRepository extends JpaRepository<Submission, UUID> {
 
     List<Submission> findByStudentIdAndDeletedFalse(UUID studentId);
 
+    List<Submission> findByPaperUploadUrlAndDeletedFalse(String paperUploadUrl);
+
     List<Submission> findByAssessmentIdAndDeletedFalseOrderBySubmittedAtDesc(UUID assessmentId);
 
     long countByAssessmentIdAndDeletedFalse(UUID assessmentId);

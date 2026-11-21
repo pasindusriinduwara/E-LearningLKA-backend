@@ -88,8 +88,13 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/assessments/*/take").hasRole("STUDENT")
                         .requestMatchers(HttpMethod.POST, "/api/v1/assessments/*/submit").hasRole("STUDENT")
                         .requestMatchers(HttpMethod.POST, "/api/v1/assessments/*/submit-essay").hasRole("STUDENT")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/assessments/*/upload-answer").hasRole("STUDENT")
                         .requestMatchers(HttpMethod.GET, "/api/v1/assessments/*/my-submission").hasRole("STUDENT")
                         .requestMatchers(HttpMethod.GET, "/api/v1/assessments/student").hasRole("STUDENT")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/assessments").hasRole("TEACHER")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/assessments/files/*").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/assessments/batch/*").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/assessments/*").hasRole("TEACHER")
                         .requestMatchers("/api/v1/assessments/**").authenticated()
 
                         .requestMatchers("/api/v1/materials/**").authenticated()

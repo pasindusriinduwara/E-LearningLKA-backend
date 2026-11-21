@@ -16,6 +16,10 @@ public interface AssessmentRepository extends JpaRepository<Assessment, UUID> {
 
     List<Assessment> findByDeletedFalseOrderByCreatedAtDesc();
 
+    List<Assessment> findByBatchIdInAndDeletedFalseOrderByCreatedAtDesc(List<UUID> batchIds);
+
+    List<Assessment> findByAttachmentUrlAndDeletedFalse(String attachmentUrl);
+
     @Query("SELECT a FROM Assessment a WHERE a.deleted = false AND (a.hidden IS NULL OR a.hidden = false) ORDER BY a.createdAt DESC")
     List<Assessment> findByDeletedFalseAndHiddenFalseOrderByCreatedAtDesc();
 

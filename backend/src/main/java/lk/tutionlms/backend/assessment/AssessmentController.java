@@ -86,8 +86,10 @@ public class AssessmentController {
      * Get all assessments.
      */
     @GetMapping
-    public ResponseEntity<List<QuizDto.AssessmentSummaryResponse>> getAllAssessments() {
-        return ResponseEntity.ok(assessmentService.getAllAssessments());
+    @PreAuthorize("hasRole('TEACHER')")
+    public ResponseEntity<List<QuizDto.AssessmentSummaryResponse>> getAllAssessments(
+            @AuthenticationPrincipal User currentUser) {
+        return ResponseEntity.ok(assessmentService.getAllAssessments(currentUser));
     }
 
     /**
@@ -110,7 +112,7 @@ public class AssessmentController {
             @org.springframework.security.core.annotation.AuthenticationPrincipal lk.tutionlms.backend.identity.User currentUser) {
         if (currentUser != null && ("TEACHER".equalsIgnoreCase(currentUser.getUserType())
                 || "ADMIN".equalsIgnoreCase(currentUser.getUserType()))) {
-            return ResponseEntity.ok(assessmentService.getAssessmentsByBatch(batchId));
+            return ResponseEntity.ok(assessmentService.getAssessmentsByBatch(batchId, currentUser));
         }
         return ResponseEntity.ok(assessmentService.getStudentAssessmentsByBatch(batchId, currentUser, studentId));
     }
@@ -213,19 +215,29 @@ public class AssessmentController {
      */
     @PostMapping("/upload-paper")
     @PreAuthorize("hasRole('TEACHER')")
-    public ResponseEntity<?> uploadPaperFile(@RequestParam("file") MultipartFile file) {
+    public ResponseEntity<?> uploadPaperFile(@RequestParam("file") MultipartFile file,
+            @AuthenticationPrincipal User currentUser) {
         try {
-            return ResponseEntity.ok(assessmentService.uploadPaperFile(file));
+            return ResponseEntity.ok(assessmentService.uploadPaperFile(file, currentUser));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(java.util.Map.of("error", e.getMessage()));
         }
+    }
+
+    @PostMapping("/{id}/upload-answer")
+    @PreAuthorize("hasRole('STUDENT')")
+    public ResponseEntity<Map<String, String>> uploadAnswer(@PathVariable UUID id,
+            @RequestParam("file") MultipartFile file, @AuthenticationPrincipal User currentUser) {
+        return ResponseEntity.ok(assessmentService.uploadAnswerFile(id, file, currentUser));
     }
 
     /**
      * Serve locally stored assessment files.
      */
     @GetMapping("/files/{filename}")
-    public ResponseEntity<org.springframework.core.io.Resource> serveFile(@PathVariable String filename) {
+    public ResponseEntity<org.springframework.core.io.Resource> serveFile(@PathVariable String filename,
+            @AuthenticationPrincipal User currentUser) {
+        assessmentService.verifyFileAccess(filename, currentUser);
         try {
             java.nio.file.Path baseDir = java.nio.file.Paths.get("uploads", "assessments").toAbsolutePath().normalize();
             java.nio.file.Path filePath = baseDir.resolve(filename).normalize();
@@ -275,9 +287,11 @@ public class AssessmentController {
      * Get single assessment with questions and options.
      */
     @GetMapping("/{id}")
-    public ResponseEntity<?> getAssessmentById(@PathVariable UUID id) {
+    @PreAuthorize("hasRole('TEACHER')")
+    public ResponseEntity<?> getAssessmentById(@PathVariable UUID id,
+            @AuthenticationPrincipal User currentUser) {
         try {
-            return ResponseEntity.ok(assessmentService.getAssessmentById(id));
+            return ResponseEntity.ok(assessmentService.getTeacherAssessment(id, currentUser));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         }

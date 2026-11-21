@@ -1,12 +1,21 @@
 package lk.tutionlms.backend.batch;
 
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import lk.tutionlms.backend.academic.Subject;
 import lk.tutionlms.backend.academic.SubjectRepository;
 import lk.tutionlms.backend.content.MaterialRepository;
 import lk.tutionlms.backend.enrollment.EnrollmentRepository;
+import lk.tutionlms.backend.enrollment.EnrollmentRequest;
 import lk.tutionlms.backend.enrollment.EnrollmentRequestRepository;
 import lk.tutionlms.backend.identity.StudentRepository;
 import lk.tutionlms.backend.identity.Teacher;
@@ -63,10 +72,72 @@ public class BatchService {
 
     @Transactional(readOnly = true)
     public List<AvailableBatchResponse> getAvailableBatches(String userEmail) {
-        return batchRepository.findByActiveTrueAndDeletedFalse()
-                .stream()
-                .map(batch -> mapToAvailableBatchResponse(batch, userEmail))
-                .toList();
+        List<Batch> batches = batchRepository.findByActiveTrueAndDeletedFalse();
+        if (batches.isEmpty()) {
+            return List.of();
+        }
+
+        List<UUID> batchIds = batches.stream().map(Batch::getId).toList();
+        Set<UUID> subjectIds = batches.stream().map(Batch::getSubjectId).filter(Objects::nonNull).collect(Collectors.toSet());
+        Set<UUID> teacherIds = batches.stream().map(Batch::getTeacherId).filter(Objects::nonNull).collect(Collectors.toSet());
+
+        Map<UUID, Subject> subjectMap = subjectRepository.findAllById(subjectIds).stream()
+                .collect(Collectors.toMap(Subject::getId, Function.identity(), (a, b) -> a));
+
+        Map<UUID, Teacher> teacherMap = teacherRepository.findAllById(teacherIds).stream()
+                .collect(Collectors.toMap(Teacher::getId, Function.identity(), (a, b) -> a));
+
+        Map<UUID, List<ScheduleItem>> scheduleMap = scheduleRepository.findByBatchIdInAndDeletedFalse(batchIds).stream()
+                .collect(Collectors.groupingBy(ScheduleItem::getBatchId));
+
+        Map<UUID, Long> enrolledCounts = new HashMap<>();
+        for (Object[] row : enrollmentRepository.countActiveEnrollmentsByBatchIds(batchIds)) {
+            if (row != null && row.length >= 2 && row[0] instanceof UUID bid && row[1] instanceof Number count) {
+                enrolledCounts.put(bid, count.longValue());
+            }
+        }
+
+        Map<UUID, Long> materialCounts = new HashMap<>();
+        for (Object[] row : materialRepository.countMaterialsByBatchIds(batchIds)) {
+            if (row != null && row.length >= 2 && row[0] instanceof UUID bid && row[1] instanceof Number count) {
+                materialCounts.put(bid, count.longValue());
+            }
+        }
+
+        Set<UUID> approvedBatchIds = new HashSet<>();
+        Map<UUID, EnrollmentRequest> requestMap = new HashMap<>();
+
+        if (userEmail != null && !userEmail.isBlank()) {
+            userRepository.findByEmail(userEmail)
+                    .flatMap(u -> studentRepository.findByUserId(u.getId()))
+                    .ifPresent(student -> {
+                        approvedBatchIds.addAll(enrollmentRepository.findActiveBatchIdsByStudentId(student.getId()));
+                        enrollmentRequestRepository.findByStudentIdAndIsDeletedFalse(student.getId()).stream()
+                                .sorted(Comparator.comparing(EnrollmentRequest::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder())).reversed())
+                                .forEach(req -> requestMap.putIfAbsent(req.getBatchId(), req));
+                    });
+        }
+
+        return batches.stream().map(batch -> {
+            Subject subject = subjectMap.get(batch.getSubjectId());
+            Teacher teacher = teacherMap.get(batch.getTeacherId());
+            List<ScheduleItem> schedules = scheduleMap.getOrDefault(batch.getId(), List.of());
+            long enrolledCount = enrolledCounts.getOrDefault(batch.getId(), 0L);
+            long materialsCount = materialCounts.getOrDefault(batch.getId(), 0L);
+
+            String status = "AVAILABLE";
+            UUID requestId = null;
+
+            if (approvedBatchIds.contains(batch.getId())) {
+                status = "APPROVED";
+            } else if (requestMap.containsKey(batch.getId())) {
+                EnrollmentRequest req = requestMap.get(batch.getId());
+                status = req.getStatus() != null ? req.getStatus().name() : "PENDING";
+                requestId = req.getId();
+            }
+
+            return buildAvailableBatchResponse(batch, subject, teacher, schedules, enrolledCount, materialsCount, status, requestId);
+        }).toList();
     }
 
     @Transactional(readOnly = true)
@@ -79,16 +150,54 @@ public class BatchService {
         Batch batch = batchRepository.findById(id)
                 .filter(b -> b.isActive() && !b.isDeleted())
                 .orElseThrow(() -> new IllegalArgumentException("Batch not found"));
-        return mapToAvailableBatchResponse(batch, userEmail);
+
+        Subject subject = batch.getSubjectId() != null
+                ? subjectRepository.findById(batch.getSubjectId()).orElse(null)
+                : null;
+        Teacher teacher = batch.getTeacherId() != null
+                ? teacherRepository.findById(batch.getTeacherId()).orElse(null)
+                : null;
+        List<ScheduleItem> schedules = scheduleRepository.findByBatchIdAndDeletedFalse(batch.getId());
+        long enrolledCount = enrollmentRepository.countByBatchIdAndStatusAndDeletedFalse(batch.getId(), "ACTIVE");
+        long materialsCount = materialRepository.countByBatchIdAndDeletedFalse(batch.getId());
+
+        String status = "AVAILABLE";
+        UUID requestId = null;
+
+        if (userEmail != null && !userEmail.isBlank()) {
+            var userOpt = userRepository.findByEmail(userEmail);
+            if (userOpt.isPresent()) {
+                var studentOpt = studentRepository.findByUserId(userOpt.get().getId());
+                if (studentOpt.isPresent()) {
+                    UUID studentId = studentOpt.get().getId();
+                    if (enrollmentRepository.isStudentActiveInBatch(studentId, batch.getId())) {
+                        status = "APPROVED";
+                    } else {
+                        var reqOpt = enrollmentRequestRepository
+                                .findTopByStudentIdAndBatchIdAndIsDeletedFalseOrderByCreatedAtDesc(studentId, batch.getId());
+                        if (reqOpt.isPresent()) {
+                            status = reqOpt.get().getStatus().name();
+                            requestId = reqOpt.get().getId();
+                        }
+                    }
+                }
+            }
+        }
+
+        return buildAvailableBatchResponse(batch, subject, teacher, schedules, enrolledCount, materialsCount, status, requestId);
     }
 
-    private AvailableBatchResponse mapToAvailableBatchResponse(Batch batch, String userEmail) {
-        String subjectName = subjectRepository.findById(batch.getSubjectId())
-                .map(Subject::getName)
-                .orElse("Unknown subject");
-
-        Teacher teacher = teacherRepository.findById(batch.getTeacherId())
-                .orElse(null);
+    private AvailableBatchResponse buildAvailableBatchResponse(
+            Batch batch,
+            Subject subject,
+            Teacher teacher,
+            List<ScheduleItem> schedules,
+            long enrolledCount,
+            long materialsCount,
+            String status,
+            UUID requestId
+    ) {
+        String subjectName = subject != null ? subject.getName() : "Unknown subject";
 
         String teacherName = "Unknown teacher";
         String teacherTitle = "Mr.";
@@ -113,7 +222,6 @@ public class BatchService {
             displayTeacher = teacherTitle + " " + teacherName;
         }
 
-        List<ScheduleItem> schedules = scheduleRepository.findByBatchIdAndDeletedFalse(batch.getId());
         List<String> scheduleList = schedules.stream()
                 .map(s -> {
                     String day = s.getDayOfWeek() != null ? s.getDayOfWeek().toString() : "";
@@ -145,32 +253,6 @@ public class BatchService {
                         s.getMode() != null ? s.getMode().name() : null
                 ))
                 .toList();
-
-        long enrolledCount = enrollmentRepository.countByBatchIdAndStatusAndDeletedFalse(batch.getId(), "ACTIVE");
-        long materialsCount = materialRepository.countByBatchIdAndDeletedFalse(batch.getId());
-
-        String status = "AVAILABLE";
-        UUID requestId = null;
-
-        if (userEmail != null && !userEmail.isBlank()) {
-            var userOpt = userRepository.findByEmail(userEmail);
-            if (userOpt.isPresent()) {
-                var studentOpt = studentRepository.findByUserId(userOpt.get().getId());
-                if (studentOpt.isPresent()) {
-                    UUID studentId = studentOpt.get().getId();
-                    if (enrollmentRepository.isStudentActiveInBatch(studentId, batch.getId())) {
-                        status = "APPROVED";
-                    } else {
-                        var reqOpt = enrollmentRequestRepository
-                                .findTopByStudentIdAndBatchIdAndIsDeletedFalseOrderByCreatedAtDesc(studentId, batch.getId());
-                        if (reqOpt.isPresent()) {
-                            status = reqOpt.get().getStatus().name();
-                            requestId = reqOpt.get().getId();
-                        }
-                    }
-                }
-            }
-        }
 
         return new AvailableBatchResponse(
                 batch.getId(),

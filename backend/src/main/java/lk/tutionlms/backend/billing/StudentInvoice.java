@@ -2,6 +2,7 @@ package lk.tutionlms.backend.billing;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import lk.tutionlms.backend.common.BaseEntity;
 import lombok.*;
@@ -9,7 +10,10 @@ import lombok.*;
 import java.util.UUID;
 
 @Entity
-@Table(name = "invoices")
+@Table(name = "invoices", indexes = {
+        @Index(name = "idx_invoices_student_id", columnList = "student_id"),
+        @Index(name = "idx_invoices_invoice_number", columnList = "invoice_number")
+})
 @Getter
 @Setter
 @NoArgsConstructor

@@ -1,5 +1,6 @@
 package lk.tutionlms.backend.scheduling;
 
+import jakarta.validation.Valid;
 import lk.tutionlms.backend.batch.Batch;
 import lk.tutionlms.backend.batch.BatchRepository;
 import lk.tutionlms.backend.enrollment.EnrollmentRepository;
@@ -17,6 +18,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Collections;
 import java.util.List;
@@ -73,19 +75,38 @@ public class ScheduleController {
     @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN')")
     public ResponseEntity<ScheduleItem> createSchedule(
             @AuthenticationPrincipal User currentUser,
-            @RequestBody ScheduleItem scheduleItem) {
+            @Valid @RequestBody CreateScheduleItemRequest request) {
         if (currentUser == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
+        Batch batch = batchRepository.findById(request.batchId())
+                .filter(b -> !b.isDeleted())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Batch not found"));
         if (!"ADMIN".equalsIgnoreCase(currentUser.getUserType())) {
             Teacher teacher = teacherRepository.findByUserId(currentUser.getId())
                     .orElseThrow(() -> new AccessDeniedException("Teacher profile not found"));
-            Batch batch = batchRepository.findById(scheduleItem.getBatchId())
-                    .orElseThrow(() -> new IllegalArgumentException("Batch not found"));
             if (!teacher.getId().equals(batch.getTeacherId())) {
                 throw new AccessDeniedException("You do not have permission to add schedules to this batch");
             }
         }
+
+        // Always create a new entity. Request-supplied IDs or deletion/audit fields
+        // must never turn this create endpoint into an update of another schedule.
+        ScheduleItem scheduleItem = ScheduleItem.builder()
+                .batchId(batch.getId())
+                .dayOfWeek(request.dayOfWeek())
+                .effectiveDate(request.effectiveDate())
+                .title(request.title().trim())
+                .subject(request.subject())
+                .teacher(request.teacher())
+                .startTime(request.startTime())
+                .endTime(request.endTime())
+                .time(request.time())
+                .location(request.location())
+                .mode(request.mode())
+                .recurrence(request.recurrence() != null ? request.recurrence() : RecurrenceType.WEEKLY)
+                .accent(request.accent())
+                .build();
         return ResponseEntity.ok(scheduleRepository.save(scheduleItem));
     }
 }

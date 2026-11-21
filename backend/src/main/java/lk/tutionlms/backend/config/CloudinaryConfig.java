@@ -5,7 +5,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import java.util.HashMap;
 import java.util.Map;
 
 @Configuration
@@ -13,25 +12,24 @@ public class CloudinaryConfig {
 
     @Bean
     public Cloudinary cloudinary(
-            @Value("${cloudinary.cloud-name:duwtj2wa7}") String cloudName,
-            @Value("${cloudinary.api-key:423854672574226}") String apiKey,
-            @Value("${cloudinary.api-secret:tuVirGvc08f0_AxwrFENCvpdFl8}") String apiSecret) {
-
-        Map<String, String> values = new HashMap<>();
-        values.put("cloud_name", clean(cloudName, "duwtj2wa7"));
-        values.put("api_key", clean(apiKey, "423854672574226"));
-        values.put("api_secret", clean(apiSecret, "tuVirGvc08f0_AxwrFENCvpdFl8"));
-        return new Cloudinary(values);
+            @Value("${cloudinary.cloud-name:}") String cloudName,
+            @Value("${cloudinary.api-key:}") String apiKey,
+            @Value("${cloudinary.api-secret:}") String apiSecret) {
+        return new Cloudinary(Map.of(
+                "cloud_name", requiredValue(cloudName, "CLOUDINARY_CLOUD_NAME"),
+                "api_key", requiredValue(apiKey, "CLOUDINARY_API_KEY"),
+                "api_secret", requiredValue(apiSecret, "CLOUDINARY_API_SECRET")));
     }
 
-    private String clean(String val, String fallback) {
-        if (val == null || val.isBlank()) {
-            return fallback;
+    private String requiredValue(String value, String setting) {
+        String normalized = value == null ? "" : value.trim();
+        if (normalized.length() >= 2 && normalized.startsWith("\"") && normalized.endsWith("\"")) {
+            normalized = normalized.substring(1, normalized.length() - 1).trim();
         }
-        val = val.trim();
-        if (val.startsWith("\"") && val.endsWith("\"") && val.length() >= 2) {
-            val = val.substring(1, val.length() - 1).trim();
+        if (normalized.isEmpty()) {
+            throw new IllegalStateException("Cloudinary configuration is missing. Set " + setting
+                    + " before starting the backend.");
         }
-        return val.isEmpty() ? fallback : val;
+        return normalized;
     }
 }

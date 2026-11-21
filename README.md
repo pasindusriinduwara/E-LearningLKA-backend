@@ -10,6 +10,14 @@ $env:CLOUDINARY_API_KEY = "your_cloudinary_api_key"
 $env:CLOUDINARY_API_SECRET = "your_cloudinary_api_secret"
 ```
 
+All three values are required. The backend rejects startup when a value is missing or
+blank; no embedded account or credential fallback is used. An ignored `backend/.env`
+file may also supply these values. Never commit that file or real credentials.
+
+Rotate the Cloudinary API credentials previously committed to this repository and update
+the deployment secret store / local `.env` with the replacement values. Removing literals
+from the current source does not revoke credentials retained in Git history.
+
 The teacher endpoint is:
 
 ```text

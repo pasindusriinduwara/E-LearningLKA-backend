@@ -21,6 +21,8 @@ import org.springframework.web.multipart.MultipartFile;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -36,6 +38,11 @@ public class AssessmentService {
     private final TeacherRepository teacherRepository;
     private final Cloudinary cloudinary;
     private final AssessmentFileRepository assessmentFileRepository;
+    private final QuizAttemptRepository quizAttemptRepository;
+
+    // Allows an automatic timeout submission to reach the server; it never restarts an attempt.
+    private static final long QUIZ_SUBMISSION_TRANSPORT_GRACE_SECONDS = 15;
+    private static final ZoneId ASSESSMENT_TIME_ZONE = ZoneId.of("Asia/Colombo");
 
     @Autowired
     public AssessmentService(
@@ -47,7 +54,8 @@ public class AssessmentService {
             EnrollmentRepository enrollmentRepository,
             TeacherRepository teacherRepository,
             AssessmentFileRepository assessmentFileRepository,
-            @Autowired(required = false) Cloudinary cloudinary) {
+            @Autowired(required = false) Cloudinary cloudinary,
+            QuizAttemptRepository quizAttemptRepository) {
         this.assessmentRepository = assessmentRepository;
         this.questionRepository = questionRepository;
         this.batchRepository = batchRepository;
@@ -57,6 +65,7 @@ public class AssessmentService {
         this.teacherRepository = teacherRepository;
         this.cloudinary = cloudinary;
         this.assessmentFileRepository = assessmentFileRepository;
+        this.quizAttemptRepository = quizAttemptRepository;
     }
 
     public void verifyTeacherAssessmentAccess(User currentUser, Assessment assessment) {
@@ -289,19 +298,96 @@ public class AssessmentService {
     @Transactional(readOnly = true)
     public QuizDto.StudentQuizTakeResponse getAssessmentForTaking(UUID assessmentId, User currentUser, String studentIdParam) {
         Assessment assessment = getAssessmentById(assessmentId);
+        UUID studentId = requireQuizStudent(assessment, currentUser);
+        requireStudentVisible(assessment);
+        Instant now = Instant.now();
+        QuizAttempt attempt = null;
+        if ("MCQ_QUIZ".equalsIgnoreCase(assessment.getAssessmentType())) {
+            requireQuizAvailable(assessment, now);
+            requireNoQuizSubmission(assessmentId, studentId);
+            attempt = quizAttemptRepository.findByAssessmentIdAndStudentIdAndDeletedFalse(assessmentId, studentId)
+                    .orElseThrow(() -> new IllegalArgumentException("Start the quiz before loading its questions."));
+            requireAttemptOpen(assessment, attempt, now);
+        }
+        return buildQuizTakeResponse(assessment, attempt, now);
+    }
 
+    /** Explicitly starts the clock before revealing MCQ questions. Repeated calls resume the same attempt. */
+    @Transactional
+    public QuizDto.StudentQuizTakeResponse startQuizAttempt(UUID assessmentId, User currentUser) {
+        Assessment assessment = lockAssessment(assessmentId);
+        UUID studentId = requireQuizStudent(assessment, currentUser);
+        Instant now = Instant.now();
+        requireQuizAvailable(assessment, now);
+        requireNoQuizSubmission(assessmentId, studentId);
+        QuizAttempt attempt = quizAttemptRepository.findByAssessmentIdAndStudentIdAndDeletedFalse(assessmentId, studentId)
+                .orElseGet(() -> {
+                    QuizAttempt created = new QuizAttempt();
+                    created.setAssessmentId(assessmentId);
+                    created.setStudentId(studentId);
+                    created.setStartedAt(now);
+                    created.setExpiresAt(quizDeadline(assessment, now.plusSeconds(assessment.getDurationMinutes().longValue() * 60)));
+                    return quizAttemptRepository.save(created);
+                });
+        requireAttemptOpen(assessment, attempt, now);
+        return buildQuizTakeResponse(assessment, attempt, now);
+    }
+
+    private UUID requireQuizStudent(Assessment assessment, User user) {
+        if (user == null || !"STUDENT".equalsIgnoreCase(user.getUserType())) {
+            throw new AccessDeniedException("Student authentication required.");
+        }
+        UUID studentId = studentRepository.findByUserId(user.getId()).map(Student::getId)
+                .orElseThrow(() -> new AccessDeniedException("Student profile not found."));
+        if (assessment.getBatchId() == null
+                || !enrollmentRepository.isStudentActiveInBatch(studentId, assessment.getBatchId())) {
+            throw new AccessDeniedException("You are not enrolled in this assessment's batch.");
+        }
+        return studentId;
+    }
+
+    private void requireStudentVisible(Assessment assessment) {
         if (assessment.isHidden() || assessment.isDeleted()) {
-            throw new IllegalArgumentException("Assessment is not currently available to students");
+            throw new IllegalArgumentException("Assessment is not currently available to students.");
         }
+    }
 
-        // Industrial Standard Guard: Verify student is actively enrolled in this assessment's batch
-        if (assessment.getBatchId() != null) {
-            UUID studentId = resolveStudentId(currentUser, studentIdParam);
-            if (studentId == null || !enrollmentRepository.isStudentActiveInBatch(studentId, assessment.getBatchId())) {
-                throw new AccessDeniedException("Access denied: You are not enrolled in the class for this assessment.");
-            }
+    private void requireMcqQuiz(Assessment assessment) {
+        requireStudentVisible(assessment);
+        if (!"MCQ_QUIZ".equalsIgnoreCase(assessment.getAssessmentType())) {
+            throw new IllegalArgumentException("This endpoint accepts MCQ quizzes only.");
         }
+        if (assessment.getDurationMinutes() == null || assessment.getDurationMinutes() <= 0) {
+            throw new IllegalArgumentException("The quiz does not have a valid duration. Contact your teacher.");
+        }
+    }
 
+    private void requireQuizAvailable(Assessment assessment, Instant now) {
+        requireMcqQuiz(assessment);
+        if (assessment.getDueDate() != null && !now.isBefore(quizDeadline(assessment, Instant.MAX))) {
+            throw new IllegalArgumentException("The assessment deadline has passed.");
+        }
+    }
+
+    private Instant quizDeadline(Assessment assessment, Instant expiresAt) {
+        if (assessment.getDueDate() == null) return expiresAt;
+        Instant deadline = assessment.getDueDate().atZone(ASSESSMENT_TIME_ZONE).toInstant();
+        return deadline.isBefore(expiresAt) ? deadline : expiresAt;
+    }
+
+    private void requireNoQuizSubmission(UUID assessmentId, UUID studentId) {
+        if (submissionRepository.findByAssessmentAndStudentWithAnswers(assessmentId, studentId).isPresent()) {
+            throw new IllegalArgumentException("You have already submitted this quiz. View your submission instead.");
+        }
+    }
+
+    private void requireAttemptOpen(Assessment assessment, QuizAttempt attempt, Instant now) {
+        if (!now.isBefore(quizDeadline(assessment, attempt.getExpiresAt()))) {
+            throw new IllegalArgumentException("Your quiz attempt has expired.");
+        }
+    }
+
+    private QuizDto.StudentQuizTakeResponse buildQuizTakeResponse(Assessment assessment, QuizAttempt attempt, Instant now) {
         String batchName = "General Batch";
         if (assessment.getBatchId() != null) {
             batchName = batchRepository.findById(assessment.getBatchId())
@@ -345,6 +431,9 @@ public class AssessmentService {
                 .assessmentType(assessment.getAssessmentType())
                 .totalMarks(assessment.getTotalMarks())
                 .durationMinutes(assessment.getDurationMinutes())
+                .startedAt(attempt == null ? null : attempt.getStartedAt())
+                .expiresAt(attempt == null ? null : quizDeadline(assessment, attempt.getExpiresAt()))
+                .serverTime(now)
                 .dueDate(assessment.getDueDate())
                 .attachmentUrl(assessment.getAttachmentUrl())
                 .instructions(assessment.getInstructions())
@@ -364,15 +453,8 @@ public class AssessmentService {
 
         Assessment assessment = lockAssessment(assessmentId);
 
-        UUID studentId = resolveStudentId(currentUser, request != null ? request.getStudentId() : null);
-        if (studentId == null) {
-            throw new AccessDeniedException("Access denied: Authenticated student identity could not be verified.");
-        }
-
-        // Industrial Standard Guard: Verify student is actively enrolled in this assessment's batch
-        if (assessment.getBatchId() != null && !enrollmentRepository.isStudentActiveInBatch(studentId, assessment.getBatchId())) {
-            throw new AccessDeniedException("Access denied: You are not enrolled in the class for this assessment.");
-        }
+        UUID studentId = requireQuizStudent(assessment, currentUser);
+        requireMcqQuiz(assessment);
 
         // Check if student already submitted - return existing graded submission
         Optional<Submission> existing = submissionRepository.findByAssessmentAndStudentWithAnswers(assessmentId, studentId);
@@ -380,13 +462,27 @@ public class AssessmentService {
             return buildSubmissionResult(assessment, existing.get());
         }
 
+        QuizAttempt attempt = quizAttemptRepository.findByAssessmentIdAndStudentIdAndDeletedFalse(assessmentId, studentId)
+                .orElseThrow(() -> new IllegalArgumentException("Start the quiz before submitting answers."));
+        Instant now = Instant.now();
+        if (now.isAfter(quizDeadline(assessment, attempt.getExpiresAt()).plusSeconds(QUIZ_SUBMISSION_TRANSPORT_GRACE_SECONDS))) {
+            throw new IllegalArgumentException("Your quiz attempt has expired. Answers can no longer be submitted.");
+        }
+
         // Map student's chosen option IDs by questionId
         Map<UUID, UUID> studentAnswersMap = new HashMap<>();
         if (request != null && request.getAnswers() != null) {
             for (QuizDto.StudentAnswerInput ans : request.getAnswers()) {
-                if (ans.getQuestionId() != null) {
-                    studentAnswersMap.put(ans.getQuestionId(), ans.getSelectedOptionId());
+                if (ans == null || ans.getQuestionId() == null || studentAnswersMap.containsKey(ans.getQuestionId())) {
+                    throw new IllegalArgumentException("Each quiz question may be answered only once.");
                 }
+                Question question = assessment.getQuestions().stream().filter(q -> q.getId().equals(ans.getQuestionId()))
+                        .findFirst().orElseThrow(() -> new IllegalArgumentException("The submitted question does not belong to this quiz."));
+                if (ans.getSelectedOptionId() != null && question.getOptions().stream()
+                        .noneMatch(option -> option.getId().equals(ans.getSelectedOptionId()))) {
+                    throw new IllegalArgumentException("The selected option does not belong to this question.");
+                }
+                studentAnswersMap.put(ans.getQuestionId(), ans.getSelectedOptionId());
             }
         }
 
@@ -965,13 +1061,27 @@ public class AssessmentService {
 
     private void verifyUploadedFileOwner(String url, User user, UUID assessmentId, boolean answerSheet) {
         String prefix = "/api/v1/assessments/files/";
-        if (url == null || !url.startsWith(prefix)) return;
-        AssessmentFile file = assessmentFileRepository.findByFilenameAndDeletedFalse(url.substring(prefix.length()))
-                .orElseThrow(() -> new AccessDeniedException("Uploaded file ownership could not be verified."));
+        if (url == null || url.isBlank()) return;
+        if (!url.startsWith(prefix)) {
+            if (answerSheet && !isExistingAnswerUrl(url, user, assessmentId)) {
+                throw new AccessDeniedException("Upload answer files through this assessment's authenticated upload endpoint.");
+            }
+            return;
+        }
+        Optional<AssessmentFile> stored = assessmentFileRepository.findByFilenameAndDeletedFalse(url.substring(prefix.length()));
+        if (stored.isEmpty() && answerSheet && isExistingAnswerUrl(url, user, assessmentId)) return;
+        AssessmentFile file = stored.orElseThrow(() -> new AccessDeniedException("Uploaded file ownership could not be verified."));
         if (user == null || !file.getUploadedBy().equals(user.getId()) || file.isAnswerSheet() != answerSheet
                 || !Objects.equals(file.getAssessmentId(), assessmentId)) {
             throw new AccessDeniedException("This uploaded file does not belong to the current submission.");
         }
+    }
+
+    private boolean isExistingAnswerUrl(String url, User user, UUID assessmentId) {
+        return user != null && "STUDENT".equalsIgnoreCase(user.getUserType()) && assessmentId != null
+                && studentRepository.findByUserId(user.getId())
+                .flatMap(student -> submissionRepository.findByAssessmentIdAndStudentIdAndDeletedFalse(assessmentId, student.getId()))
+                .map(submission -> url.equals(submission.getPaperUploadUrl())).orElse(false);
     }
 
     private Map<String, String> storePaperFile(MultipartFile file, User currentUser, UUID assessmentId, boolean answerSheet) {
@@ -982,8 +1092,19 @@ public class AssessmentService {
             throw new IllegalArgumentException("File must be 20 MB or smaller.");
         }
         String originalName = file.getOriginalFilename() != null ? file.getOriginalFilename() : "paper.pdf";
+        String extension = originalName.contains(".")
+                ? originalName.substring(originalName.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT) : "";
+        Map<String, String> allowedTypes = Map.of(
+                "pdf", "application/pdf", "doc", "application/msword",
+                "docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "png", "image/png", "jpg", "image/jpeg", "jpeg", "image/jpeg", "webp", "image/webp");
+        String contentType = file.getContentType() == null ? "" : file.getContentType().split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
+        if (!allowedTypes.containsKey(extension) || !allowedTypes.get(extension).equals(contentType)) {
+            throw new IllegalArgumentException("Only PDF, DOC, DOCX, PNG, JPG and WEBP files with a matching content type are supported.");
+        }
         try {
-            if (cloudinary != null) {
+            // Answer sheets must only be served by our authenticated ownership-checked endpoint.
+            if (!answerSheet && cloudinary != null) {
                 Map<?, ?> uploadResult = cloudinary.uploader().upload(
                         file.getBytes(),
                         ObjectUtils.asMap(
@@ -1001,7 +1122,8 @@ public class AssessmentService {
             }
         } catch (Exception e) {
             // Log and fallback to local file storage
-            System.err.println("Cloudinary paper upload failed, falling back to local storage: " + e.getMessage());
+            org.slf4j.LoggerFactory.getLogger(AssessmentService.class)
+                    .warn("Teacher paper upload failed; using local storage.");
         }
 
         // Local storage fallback
@@ -1010,7 +1132,7 @@ public class AssessmentService {
             if (!java.nio.file.Files.exists(uploadDir)) {
                 java.nio.file.Files.createDirectories(uploadDir);
             }
-            String uniqueName = UUID.randomUUID() + "_" + originalName.replaceAll("[^a-zA-Z0-9.-]", "_");
+            String uniqueName = UUID.randomUUID() + "." + extension;
             java.nio.file.Path targetPath = uploadDir.resolve(uniqueName);
             try (java.io.InputStream input = file.getInputStream()) {
                 java.nio.file.Files.copy(input, targetPath);
@@ -1032,7 +1154,7 @@ public class AssessmentService {
             response.put("fileName", originalName);
             return response;
         } catch (Exception ex) {
-            throw new RuntimeException("Failed to store paper file locally: " + ex.getMessage(), ex);
+            throw new RuntimeException("Failed to store assessment file.", ex);
         }
     }
 

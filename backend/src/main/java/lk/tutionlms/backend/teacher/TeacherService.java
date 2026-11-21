@@ -172,9 +172,12 @@ public class TeacherService {
 
     @Transactional
     public Announcement createAnnouncement(User user, CreateAnnouncementRequest r) {
+        if (user == null || !("TEACHER".equals(user.getUserType()) || "ADMIN".equals(user.getUserType()))) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Teacher authentication required");
+        }
         if (r.batchId() != null)
             verifyBatchOwnership(user, r.batchId());
-        return announcementRepository.save(Announcement.builder().batchId(r.batchId()).title(r.title())
+        return announcementRepository.save(Announcement.builder().batchId(r.batchId()).createdBy(user.getId()).title(r.title())
                 .description(r.description()).type(r.type()).time(r.time()).build());
     }
 
@@ -185,6 +188,9 @@ public class TeacherService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Announcement not found"));
         if (announcement.getBatchId() != null) {
             verifyBatchOwnership(user, announcement.getBatchId());
+        } else if (user == null || !("ADMIN".equals(user.getUserType())
+                || ("TEACHER".equals(user.getUserType()) && user.getId().equals(announcement.getCreatedBy())))) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only the announcement author can delete this global announcement");
         }
         announcement.setDeleted(true);
         announcementRepository.save(announcement);

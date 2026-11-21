@@ -22,8 +22,9 @@ class ResultPublicationTests {
     final StudentRepository students = mock(StudentRepository.class);
     final TeacherRepository teachers = mock(TeacherRepository.class);
     final EnrollmentRepository enrollments = mock(EnrollmentRepository.class);
+    final QuizAttemptRepository attempts = mock(QuizAttemptRepository.class);
     final AssessmentService service = new AssessmentService(assessments, mock(QuestionRepository.class), batches,
-            submissions, students, enrollments, teachers, mock(AssessmentFileRepository.class), null);
+            submissions, students, enrollments, teachers, mock(AssessmentFileRepository.class), null, attempts);
     final User teacherUser = user("TEACHER"), studentUser = user("STUDENT");
     final Teacher teacher = new Teacher();
     final Student student = new Student();
@@ -161,6 +162,11 @@ class ResultPublicationTests {
     }
 
     @Test void mcqSubmissionResponseDoesNotLeakImmediateGradeOrAnswers() {
+        QuizAttempt attempt = new QuizAttempt();
+        attempt.setStartedAt(java.time.Instant.now());
+        attempt.setExpiresAt(java.time.Instant.now().plusSeconds(3600));
+        when(attempts.findByAssessmentIdAndStudentIdAndDeletedFalse(assessment.getId(), student.getId()))
+                .thenReturn(Optional.of(attempt));
         QuestionOption option = QuestionOption.builder().id(UUID.randomUUID()).optionText("Correct").correct(true).build();
         Question q = Question.builder().marks(new BigDecimal("100")).questionText("Question").options(List.of(option)).build();
         q.setId(UUID.randomUUID()); assessment.setQuestions(List.of(q));

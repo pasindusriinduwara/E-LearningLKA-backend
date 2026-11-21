@@ -19,6 +19,9 @@ public class Announcement extends BaseEntity {
     @Column(name = "batch_id")
     private UUID batchId;
 
+    @Column(name = "created_by")
+    private UUID createdBy;
+
     @Column(nullable = false)
     private String title;
 

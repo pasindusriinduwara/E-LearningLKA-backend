@@ -9,14 +9,26 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.server.ResponseStatusException;
+import lk.tutionlms.backend.security.AuthRateLimitException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    @ExceptionHandler(AuthRateLimitException.class)
+    public ResponseEntity<Map<String, Object>> handleAuthRateLimit(AuthRateLimitException ex) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", Long.toString(ex.getRetryAfterSeconds()))
+                .body(Map.of("status", 429, "message", ex.getMessage()));
+    }
 
     @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class)
     public ResponseEntity<Map<String, Object>> handleAccessDenied(
@@ -27,6 +39,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<Map<String, Object>> handleResponseStatusException(ResponseStatusException ex) {
+        if (ex.getStatusCode().is5xxServerError()) return handleGenericException(ex);
         return ResponseEntity.status(ex.getStatusCode()).body(Map.of(
                 "timestamp", LocalDateTime.now().toString(),
                 "status", ex.getStatusCode().value(),
@@ -112,9 +125,12 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> handleGenericException(Exception ex) {
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+        String errorId = UUID.randomUUID().toString();
+        log.error("Unexpected server error. Reference: {}", errorId, ex);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).header("X-Error-Id", errorId).body(Map.of(
                 "timestamp", LocalDateTime.now().toString(),
                 "status", HttpStatus.INTERNAL_SERVER_ERROR.value(),
-                "message", "An unexpected server error occurred: " + ex.getMessage()));
+                "message", "An unexpected server error occurred. Please try again later.",
+                "errorId", errorId));
     }
 }

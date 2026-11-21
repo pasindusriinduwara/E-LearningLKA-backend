@@ -87,6 +87,7 @@ public class SecurityConfig {
 
                         // Assessment Student-only taking and submission routes
                         .requestMatchers(HttpMethod.GET, "/api/v1/assessments/*/take").hasRole("STUDENT")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/assessments/*/start").hasRole("STUDENT")
                         .requestMatchers(HttpMethod.POST, "/api/v1/assessments/*/submit").hasRole("STUDENT")
                         .requestMatchers(HttpMethod.POST, "/api/v1/assessments/*/submit-essay").hasRole("STUDENT")
                         .requestMatchers(HttpMethod.POST, "/api/v1/assessments/*/upload-answer").hasRole("STUDENT")
@@ -139,7 +140,7 @@ public class SecurityConfig {
                 List.of("Authorization", "Content-Type", "Accept", "X-Requested-With", "Origin"));
 
         configuration.setExposedHeaders(
-                List.of("Authorization"));
+                List.of("Authorization", "Retry-After", "X-Error-Id"));
 
         configuration.setAllowCredentials(true);
 

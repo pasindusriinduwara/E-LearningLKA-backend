@@ -1,7 +1,6 @@
 package lk.tutionlms.backend.assessment;
 
 import com.cloudinary.Cloudinary;
-import com.cloudinary.Uploader;
 import lk.tutionlms.backend.assessment.dto.QuizDto;
 import lk.tutionlms.backend.batch.Batch;
 import lk.tutionlms.backend.batch.BatchRepository;
@@ -29,7 +28,7 @@ class AssessmentAccessTests {
     private final AssessmentFileRepository files = mock(AssessmentFileRepository.class);
     private final Cloudinary cloudinary = mock(Cloudinary.class);
     private final AssessmentService service = new AssessmentService(assessments, mock(QuestionRepository.class),
-            batches, submissions, students, enrollments, teachers, files, cloudinary);
+            batches, submissions, students, enrollments, teachers, files, cloudinary, mock(QuizAttemptRepository.class));
     private final User studentUser = user("STUDENT");
     private final User teacherUser = user("TEACHER");
     private final Student student = new Student();
@@ -138,10 +137,79 @@ class AssessmentAccessTests {
     @Test
     void enrolledStudentCanUploadAnEssayAnswer() throws Exception {
         enrollStudent();
-        Uploader uploader = mock(Uploader.class);
-        when(cloudinary.uploader()).thenReturn(uploader);
-        when(uploader.upload(any(), anyMap())).thenReturn(Map.of("secure_url", "https://example.test/answer.pdf"));
-        assertEquals("https://example.test/answer.pdf", service.uploadAnswerFile(assessment.getId(), paper, studentUser).get("url"));
+        Map<String, String> response = service.uploadAnswerFile(assessment.getId(), paper, studentUser);
+        String url = response.get("url");
+        assertTrue(url.startsWith("/api/v1/assessments/files/"));
+        var stored = org.mockito.ArgumentCaptor.forClass(AssessmentFile.class);
+        verify(files).saveAndFlush(stored.capture());
+        assertEquals(studentUser.getId(), stored.getValue().getUploadedBy());
+        assertEquals(assessment.getId(), stored.getValue().getAssessmentId());
+        assertTrue(stored.getValue().isAnswerSheet());
+        verifyNoInteractions(cloudinary);
+        java.nio.file.Files.deleteIfExists(java.nio.file.Path.of("uploads", "assessments", stored.getValue().getFilename()));
+    }
+
+    @Test
+    void executableAndHtmlOrMismatchedTypesAreRejectedBeforeStorage() {
+        enrollStudent();
+        for (MockMultipartFile unsafe : List.of(
+                new MockMultipartFile("file", "answer.html", "text/html", new byte[]{1}),
+                new MockMultipartFile("file", "answer.exe", "application/pdf", new byte[]{1}),
+                new MockMultipartFile("file", "answer.pdf", "text/html", new byte[]{1}))) {
+            assertThrows(IllegalArgumentException.class, () -> service.uploadAnswerFile(assessment.getId(), unsafe, studentUser));
+        }
+        verifyNoInteractions(cloudinary, files);
+    }
+
+    @Test
+    void newAnswerCannotUseAnArbitraryExternalUrl() {
+        enrollStudent();
+        when(assessments.findByIdForUpdate(assessment.getId())).thenReturn(Optional.of(assessment));
+        var request = QuizDto.EssaySubmissionRequest.builder().paperUploadUrl("https://example.test/other-answer.pdf").build();
+        assertThrows(AccessDeniedException.class, () -> service.submitEssay(assessment.getId(), request, studentUser));
+        verify(submissions, never()).save(any());
+    }
+
+    @Test
+    void anotherStudentsUploadedFileCannotBeAttachedToMySubmission() {
+        enrollStudent();
+        when(assessments.findByIdForUpdate(assessment.getId())).thenReturn(Optional.of(assessment));
+        AssessmentFile other = new AssessmentFile();
+        other.setUploadedBy(UUID.randomUUID()); other.setAnswerSheet(true); other.setAssessmentId(assessment.getId());
+        when(files.findByFilenameAndDeletedFalse("other.pdf")).thenReturn(Optional.of(other));
+        var request = QuizDto.EssaySubmissionRequest.builder().paperUploadUrl("/api/v1/assessments/files/other.pdf").build();
+        assertThrows(AccessDeniedException.class, () -> service.submitEssay(assessment.getId(), request, studentUser));
+        verify(submissions, never()).save(any());
+    }
+
+    @Test
+    void studentCanSubmitTheirOwnPrivateFileForTheSameAssessment() {
+        enrollStudent();
+        when(assessments.findByIdForUpdate(assessment.getId())).thenReturn(Optional.of(assessment));
+        AssessmentFile own = new AssessmentFile();
+        own.setUploadedBy(studentUser.getId()); own.setAnswerSheet(true); own.setAssessmentId(assessment.getId());
+        when(files.findByFilenameAndDeletedFalse("own.pdf")).thenReturn(Optional.of(own));
+        when(submissions.save(any())).thenAnswer(call -> call.getArgument(0));
+        var request = QuizDto.EssaySubmissionRequest.builder().paperUploadUrl("/api/v1/assessments/files/own.pdf").build();
+        assertDoesNotThrow(() -> service.submitEssay(assessment.getId(), request, studentUser));
+        verify(submissions).save(argThat(submission -> "/api/v1/assessments/files/own.pdf".equals(submission.getPaperUploadUrl())));
+    }
+
+    @Test
+    void existingLegacyAnswerLinkCanBeRetainedWhileUpdatingText() {
+        enrollStudent();
+        when(assessments.findByIdForUpdate(assessment.getId())).thenReturn(Optional.of(assessment));
+        String legacy = "https://example.test/legacy-answer.pdf";
+        Submission existing = Submission.builder().assessmentId(assessment.getId()).studentId(student.getId())
+                .status("SUBMITTED").paperUploadUrl(legacy).answers(new ArrayList<>()).build();
+        when(submissions.findByAssessmentIdAndStudentIdAndDeletedFalse(assessment.getId(), student.getId()))
+                .thenReturn(Optional.of(existing));
+        when(submissions.findByAssessmentAndStudentWithAnswers(assessment.getId(), student.getId()))
+                .thenReturn(Optional.of(existing));
+        when(submissions.save(any())).thenAnswer(call -> call.getArgument(0));
+        var request = QuizDto.EssaySubmissionRequest.builder().paperUploadUrl(legacy).answerText("Updated answer").build();
+        assertDoesNotThrow(() -> service.submitEssay(assessment.getId(), request, studentUser));
+        assertEquals(legacy, existing.getPaperUploadUrl());
     }
 
     @Test

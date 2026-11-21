@@ -8,6 +8,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -151,6 +152,9 @@ public class QuizDto {
         private String assessmentType;
         private BigDecimal totalMarks;
         private Integer durationMinutes;
+        private Instant startedAt;
+        private Instant expiresAt;
+        private Instant serverTime;
         private LocalDateTime dueDate;
         private String attachmentUrl;
         private String instructions;

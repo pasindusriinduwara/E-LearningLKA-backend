@@ -44,9 +44,7 @@ public class AssessmentController {
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
         } catch (IOException e) {
-            log.error("Failed to read or parse PDF", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("Error extracting text from PDF: " + e.getMessage());
+            throw new java.io.UncheckedIOException("Failed to read PDF", e);
         }
     }
 
@@ -75,10 +73,6 @@ public class AssessmentController {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", e.getMessage()));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
-        } catch (Exception e) {
-            log.error("Error creating quiz", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("message", "Error creating assessment: " + e.getMessage()));
         }
     }
 
@@ -122,6 +116,7 @@ public class AssessmentController {
      * Strips all correct answer markers and explanations.
      */
     @GetMapping("/{id}/take")
+    @PreAuthorize("hasRole('STUDENT')")
     public ResponseEntity<?> getAssessmentForTaking(
             @PathVariable UUID id,
             @RequestParam(required = false) String studentId,
@@ -135,10 +130,23 @@ public class AssessmentController {
         }
     }
 
+    @PostMapping("/{id}/start")
+    @PreAuthorize("hasRole('STUDENT')")
+    public ResponseEntity<?> startQuizAttempt(@PathVariable UUID id, @AuthenticationPrincipal User currentUser) {
+        try {
+            return ResponseEntity.ok(assessmentService.startQuizAttempt(id, currentUser));
+        } catch (AccessDeniedException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", e.getMessage()));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+
     /**
      * Server-side grading of student quiz submission.
      */
     @PostMapping("/{id}/submit")
+    @PreAuthorize("hasRole('STUDENT')")
     public ResponseEntity<?> submitQuiz(
             @PathVariable UUID id,
             @RequestBody QuizDto.QuizSubmissionRequest request,
@@ -217,11 +225,7 @@ public class AssessmentController {
     @PreAuthorize("hasRole('TEACHER')")
     public ResponseEntity<?> uploadPaperFile(@RequestParam("file") MultipartFile file,
             @AuthenticationPrincipal User currentUser) {
-        try {
-            return ResponseEntity.ok(assessmentService.uploadPaperFile(file, currentUser));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(java.util.Map.of("error", e.getMessage()));
-        }
+        return ResponseEntity.ok(assessmentService.uploadPaperFile(file, currentUser));
     }
 
     @PostMapping("/{id}/upload-answer")
@@ -257,6 +261,9 @@ public class AssessmentController {
                     contentType = "image/jpeg";
                 return ResponseEntity.ok()
                         .header(org.springframework.http.HttpHeaders.CONTENT_TYPE, contentType)
+                        .header("X-Content-Type-Options", "nosniff")
+                        .header(org.springframework.http.HttpHeaders.CACHE_CONTROL, "private, no-store")
+                        .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
                         .body(resource);
             } else {
                 return ResponseEntity.notFound().build();

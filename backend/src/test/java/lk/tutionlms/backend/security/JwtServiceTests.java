@@ -17,6 +17,21 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class JwtServiceTests {
+    @Test
+    void changingCredentialsRevokesOldTokensIncludingLegacyTokens() {
+        lk.tutionlms.backend.identity.User user = lk.tutionlms.backend.identity.User.builder()
+                .email("owner@example.test").password("unused").userType("STUDENT").build();
+        String old = jwtService.generateToken(user);
+        String legacy = Jwts.builder().setSubject(user.getUsername()).setExpiration(Date.from(Instant.now().plusSeconds(60)))
+                .signWith(Keys.hmacShaKeyFor(Decoders.BASE64.decode(SECRET)), SignatureAlgorithm.HS256).compact();
+        assertTrue(jwtService.isTokenValid(old,user)); assertTrue(jwtService.isTokenValid(legacy,user));
+        user.setCredentialVersion(1);
+        assertFalse(jwtService.isTokenValid(old,user)); assertFalse(jwtService.isTokenValid(legacy,user));
+        assertTrue(jwtService.isTokenValid(jwtService.generateToken(user),user));
+        String malformed = Jwts.builder().setSubject(user.getUsername()).claim("cv","1").setExpiration(Date.from(Instant.now().plusSeconds(60)))
+                .signWith(Keys.hmacShaKeyFor(Decoders.BASE64.decode(SECRET)), SignatureAlgorithm.HS256).compact();
+        assertFalse(jwtService.isTokenValid(malformed,user));
+    }
     private static final String SECRET = Base64.getEncoder().encodeToString(
             "test-only-signing-key-at-least-32-bytes".getBytes(StandardCharsets.UTF_8));
     private final JwtService jwtService = new JwtService(SECRET, 420_000);

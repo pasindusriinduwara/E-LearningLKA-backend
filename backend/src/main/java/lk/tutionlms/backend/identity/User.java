@@ -27,6 +27,10 @@ public class User extends BaseEntity implements UserDetails {
     @Column(name = "password_hash", nullable = false)
     private String password;
 
+    @Column(name = "credential_version", nullable = false, columnDefinition = "integer default 0")
+    @Builder.Default
+    private int credentialVersion = 0;
+
     @Column(name = "phone_number", length = 20)
     private String phoneNumber;
 

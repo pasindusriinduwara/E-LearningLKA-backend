@@ -1,11 +1,13 @@
 package lk.tutionlms.backend.security;
 
 import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import lk.tutionlms.backend.common.GlobalExceptionHandler;
 import lk.tutionlms.backend.identity.auth.AuthController;
 import lk.tutionlms.backend.identity.auth.AuthenticationService;
+import lk.tutionlms.backend.identity.auth.AuthenticationResponse;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -83,6 +85,37 @@ class AuthRateLimiterTests {
                     || event.getFormattedMessage().contains("private-account-")));
         } finally {
             root.detachAppender(capture); capture.stop();
+        }
+    }
+
+    @Test
+    void authenticationFieldsStayPrivateWhenFrameworkBodyLoggingIsEnabled() throws Exception {
+        AuthenticationService auth = mock(AuthenticationService.class);
+        AuthenticationResponse response = AuthenticationResponse.builder().token("DO-NOT-LOG-session-token")
+                .email("private-debug@example.test").role("STUDENT").build();
+        when(auth.authenticate(any())).thenReturn(response);
+        when(auth.register(any())).thenReturn(response);
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(new AuthController(auth,
+                new AuthRateLimiter(100, 10, 60, 900, 10, 3, 600, 100))).build();
+        Logger bodyLogger = (Logger) LoggerFactory.getLogger(
+                "org.springframework.web.servlet.mvc.method.annotation");
+        Level originalLevel = bodyLogger.getLevel();
+        ListAppender<ILoggingEvent> capture = new ListAppender<>();
+        capture.start(); bodyLogger.addAppender(capture); bodyLogger.setLevel(Level.DEBUG);
+        try {
+            String body = "{\"email\":\"private-debug@example.test\",\"password\":\"DO-NOT-LOG-debug-secret\"}";
+            mvc.perform(post("/auth/login").contentType("application/json").content(body))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.token").value("DO-NOT-LOG-session-token"));
+            mvc.perform(post("/auth/register").contentType("application/json").content(body))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.token").value("DO-NOT-LOG-session-token"));
+            assertTrue(capture.list.stream().anyMatch(event -> event.getFormattedMessage().contains("AuthenticationRequest")));
+            assertTrue(capture.list.stream().anyMatch(event -> event.getFormattedMessage().contains("RegisterRequest")));
+            assertTrue(capture.list.stream().anyMatch(event -> event.getFormattedMessage().contains("AuthenticationResponse")));
+            assertTrue(capture.list.stream().noneMatch(event -> event.getFormattedMessage().contains("private-debug@example.test")
+                    || event.getFormattedMessage().contains("DO-NOT-LOG-debug-secret")
+                    || event.getFormattedMessage().contains("DO-NOT-LOG-session-token")));
+        } finally {
+            bodyLogger.setLevel(originalLevel); bodyLogger.detachAppender(capture); capture.stop();
         }
     }
 

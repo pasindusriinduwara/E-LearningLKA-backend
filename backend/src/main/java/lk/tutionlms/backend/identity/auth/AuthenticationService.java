@@ -48,6 +48,7 @@ public class AuthenticationService {
 
     @Transactional
     public AuthenticationResponse register(RegisterRequest request) {
+        PasswordService.validatePassword(request.getPassword());
         if (request.getEmail() == null || request.getEmail().trim().isBlank()) {
             throw new IllegalArgumentException("Email address is required.");
         }

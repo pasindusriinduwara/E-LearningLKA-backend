@@ -47,8 +47,12 @@ public class JwtService {
 
     public String generateToken(Map<String, Object> extraClaims, UserDetails userDetails) {
         long issuedAt = System.currentTimeMillis();
+        Map<String, Object> claims = new HashMap<>(extraClaims);
+        if (userDetails instanceof lk.tutionlms.backend.identity.User user) {
+            claims.put("cv", user.getCredentialVersion());
+        }
         return Jwts.builder()
-                .setClaims(extraClaims)
+                .setClaims(claims)
                 .setSubject(userDetails.getUsername())
                 .setIssuedAt(new Date(issuedAt))
                 .setExpiration(new Date(Math.addExact(issuedAt, expirationMillis)))
@@ -65,6 +69,11 @@ public class JwtService {
             Claims claims = extractAllClaims(token);
             String username = claims.getSubject();
             Date expiresAt = claims.getExpiration();
+            if (userDetails instanceof lk.tutionlms.backend.identity.User user) {
+                Object version = claims.get("cv");
+                if (version == null ? user.getCredentialVersion() != 0
+                        : !(version instanceof Integer) || ((Integer) version) != user.getCredentialVersion()) return false;
+            }
             return username != null && username.equals(userDetails.getUsername())
                     && expiresAt != null && expiresAt.after(new Date());
         } catch (JwtException | IllegalArgumentException ex) {

@@ -1,5 +1,27 @@
 # E-LearningLKA-backend
 
+See the workspace `DEPLOYMENT.md` for complete setup, versioned database migrations,
+production configuration, CI, private storage, backups and recovery.
+
+## Account recovery and class lifecycle
+
+`POST /auth/forgot-password` accepts `{ "email": "..." }` and always returns a generic
+202 response for a valid request, whether or not an active account exists. Configure
+SMTP and `APP_PUBLIC_URL` using `backend/.env.example`. Email links carry a random
+single-use token in the fragment, expire after 30 minutes and are never logged.
+`POST /auth/reset-password` accepts `{ "token": "...", "password": "..." }`.
+Authenticated `POST /api/v1/account/password` accepts `{ "currentPassword": "...",
+"password": "..." }`. Successful reset/change revokes all existing JWT sessions.
+
+Owners can `PUT /api/v1/batches/{id}` with class name, four-digit exam year, subject ID
+and delivery mode, or `PATCH /api/v1/batches/{id}/status` with `{ "active": false|true }`.
+Archival preserves records and pauses student access; restoration resumes effective
+access for active approved enrollments. Legacy fee history is unchanged.
+
+The `prod` profile enables Flyway and Hibernate schema validation. Fresh databases
+use migrations V1 and V2. Existing databases require the explicit baseline described
+in `DEPLOYMENT.md`; automatic baselining remains disabled.
+
 ## Cloudinary material upload
 
 Set the Cloudinary credentials in the same PowerShell session used to start the Backend:
@@ -116,3 +138,60 @@ Global announcements record the authenticated creator. Only that teacher can del
 global announcement; legacy announcements with no author require administrator maintenance.
 Batch announcements retain batch-owner checks. With automatic DDL disabled, apply
 `backend/database/007_announcement_author.sql`.
+
+## Teacher and student notifications
+
+Both portals have a persistent private notification inbox. These authenticated endpoints
+always use the current account; supplying another recipient ID cannot change the scope:
+
+- `GET /api/v1/notifications?page=0&size=20` returns `items`, `unreadCount`, `page`, `size`,
+  `totalElements` and `totalPages`, ordered by newest creation time and ID. Page numbers
+  must be nonnegative, sizes positive, and sizes above 50 are capped at 50.
+- `GET /api/v1/notifications/unread-count` returns `{ "unreadCount": 0 }`.
+- `PATCH /api/v1/notifications/{id}/read` marks an owned entry read and returns it.
+  Missing or foreign entries return 404. Repeating the update preserves its first read time.
+- `PATCH /api/v1/notifications/read-all` marks only the current account's unread entries
+  read and returns the remaining unread count, including any concurrently created entries.
+
+Each item contains `id`, `type`, `title`, `message`, `link`, `createdAt`, `read` and `readAt`.
+Times are UTC ISO instants; unread entries have a null `readAt`. Responses use `no-store`.
+Only active student and teacher accounts can access this API. There is no public endpoint
+for creating notifications or selecting recipients. Internal notification writes join the
+business transaction, so a failed operation does not leave a misleading inbox entry.
+Batch delivery includes only active, nondeleted enrollments, student profiles, accounts
+and batches. Teacher delivery resolves the batch owner's user account. Links are restricted
+to relative application paths, and plain text titles/messages are limited to their storage
+lengths. Notifications are in-app only; no email or push service is required.
+
+The current `ddl-auto=update` configuration creates the `notifications` table and indexes
+after a backend restart. With automatic DDL disabled, apply
+`backend/database/008_notifications.sql` before starting the backend. Existing historical
+activity is not backfilled into the inbox.
+
+## Teacher-controlled access and paused payments
+
+Payments are temporarily disabled. `GET /api/v1/invoices/my-invoices` returns HTTP
+410 without reading or changing invoice history. Class creation accepts an omitted
+legacy `monthlyFee` and stores zero for new classes. Existing class fees and billing
+records are preserved; payment status does not grant or block class access.
+
+Teachers manage their own students through:
+
+- `GET /api/v1/enrollments/teacher/requests`: pending and previous decisions, student
+  and class details, `batchActive` and current effective `accessGranted`.
+- `PUT /api/v1/enrollments/teacher/requests/{id}/access` with `{ "allowed": true }`
+  to approve/restore access, or `{ "allowed": false }` to reject/revoke it. The
+  response contains `message`, `accessGranted` and `status`.
+
+Grants require an active class and available student account. Denial deactivates all
+matching enrollment rows; restoring access reuses an existing row. Repeating the same
+decision does not duplicate enrollment or access notifications. Student and request
+locks serialize teacher decisions with student leave/cancel/re-request actions.
+The existing pending-only approve/reject endpoints remain available.
+
+Current active enrollment is the authority for student content access. A historical
+approved request alone does not allow access. Materials, assessments and schedule
+reads respect current enrollment; schedule feeds require authentication and return
+only the student's allowed classes or the teacher's own classes. There is no fallback
+to global schedules when an account has no classes. No new database migration is
+required for these access and payment changes.

@@ -116,7 +116,7 @@ public class EnrollmentController {
 
     @GetMapping("/pending")
     @PreAuthorize("hasRole('TEACHER')")
-    public ResponseEntity<List<EnrollmentRequest>>
+    public ResponseEntity<List<TeacherEnrollmentRequestResponse>>
     getPendingRequests() {
 
         Authentication authentication =
@@ -129,6 +129,19 @@ public class EnrollmentController {
                         authentication.getName()
                 )
         );
+    }
+
+    @GetMapping("/teacher/requests")
+    @PreAuthorize("hasRole('TEACHER')")
+    public ResponseEntity<List<TeacherEnrollmentRequestResponse>> getTeacherRequests(Authentication authentication) {
+        return ResponseEntity.ok(enrollmentService.getRequestsForTeacher(authentication.getName()));
+    }
+
+    @PutMapping("/teacher/requests/{id}/access")
+    @PreAuthorize("hasRole('TEACHER')")
+    public ResponseEntity<StudentClassAccessResponse> setStudentClassAccess(
+            @PathVariable UUID id, @RequestBody StudentClassAccessRequest request, Authentication authentication) {
+        return ResponseEntity.ok(enrollmentService.setStudentClassAccess(authentication.getName(), id, request.allowed()));
     }
 
     @PutMapping("/teacher/requests/{id}/approve")

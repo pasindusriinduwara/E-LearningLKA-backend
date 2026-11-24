@@ -7,6 +7,7 @@ import lk.tutionlms.backend.identity.Student;
 import lk.tutionlms.backend.identity.StudentRepository;
 import lk.tutionlms.backend.identity.TeacherRepository;
 import lk.tutionlms.backend.identity.User;
+import lk.tutionlms.backend.notification.NotificationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.access.AccessDeniedException;
@@ -30,9 +31,10 @@ class QuizAttemptSecurityTests {
     private final StudentRepository students = mock(StudentRepository.class);
     private final EnrollmentRepository enrollments = mock(EnrollmentRepository.class);
     private final QuizAttemptRepository attempts = mock(QuizAttemptRepository.class);
+    private final NotificationService notifications = mock(NotificationService.class);
     private final AssessmentService service = new AssessmentService(assessments, mock(QuestionRepository.class),
             mock(BatchRepository.class), submissions, students, enrollments, mock(TeacherRepository.class),
-            mock(AssessmentFileRepository.class), null, attempts);
+            mock(AssessmentFileRepository.class), null, attempts, notifications);
     private final User user = new User();
     private final Student student = new Student();
     private final Assessment quiz = Assessment.builder().title("Timed quiz").batchId(UUID.randomUUID())
@@ -159,6 +161,8 @@ class QuizAttemptSecurityTests {
         var result = service.submitQuiz(quiz.getId(), answers, user);
         assertFalse(result.isResultPublished()); assertNull(result.getScoreObtained());
         verify(submissions).save(any());
+        verify(notifications).notifyBatchTeacher(eq(quiz.getBatchId()), eq("ASSESSMENT_SUBMITTED"),
+                eq("New assessment submission"), eq("A student submitted Timed quiz."), eq("/teacher/results"));
     }
 
     @Test
@@ -178,6 +182,7 @@ class QuizAttemptSecurityTests {
         assertEquals(original.getId(), service.submitQuiz(quiz.getId(), answers, user).getSubmissionId());
         assertThrows(IllegalArgumentException.class, () -> service.startQuizAttempt(quiz.getId(), user));
         verifyNoInteractions(attempts); verify(submissions, never()).save(any());
+        verifyNoInteractions(notifications);
     }
 
     @Test

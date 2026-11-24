@@ -184,7 +184,8 @@ class ScheduleSecurityTests {
         @Bean ScheduleController scheduleController(ScheduleRepository schedules, UserRepository users,
                 StudentRepository students, EnrollmentRepository enrollments, TeacherRepository teachers,
                 BatchRepository batches) {
-            return new ScheduleController(schedules, users, students, enrollments, teachers, batches);
+            return new ScheduleController(schedules, users, students, enrollments, teachers, batches,
+                    mock(lk.tutionlms.backend.notification.NotificationService.class));
         }
         @Bean SecurityFilterChain security(HttpSecurity http) throws Exception {
             return http.csrf(csrf -> csrf.disable())

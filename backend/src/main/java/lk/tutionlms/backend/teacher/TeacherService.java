@@ -14,6 +14,7 @@ import lk.tutionlms.backend.communication.*;
 import lk.tutionlms.backend.content.*;
 import lk.tutionlms.backend.enrollment.*;
 import lk.tutionlms.backend.identity.*;
+import lk.tutionlms.backend.notification.NotificationService;
 import lk.tutionlms.backend.scheduling.*;
 import lk.tutionlms.backend.teacher.dto.*;
 import lombok.RequiredArgsConstructor;
@@ -36,6 +37,7 @@ public class TeacherService {
     private final MaterialRepository materialRepository;
     private final AnnouncementRepository announcementRepository;
     private final SubjectRepository subjectRepository;
+    private final NotificationService notificationService;
 
     public Teacher teacher(User user) {
         return teacherRepository.findByUserId(user.getId())
@@ -149,9 +151,12 @@ public class TeacherService {
     @Transactional
     public LearningMaterial createMaterial(User user, CreateMaterialRequest r) {
         verifyBatchOwnership(user, r.batchId());
-        return materialRepository
+        LearningMaterial material = materialRepository
                 .save(LearningMaterial.builder().batchId(r.batchId()).title(r.title()).subject(r.subject())
                         .type(r.type()).time(r.time()).size(r.size()).fileUrl(r.fileUrl()).build());
+        notificationService.notifyBatchStudents(r.batchId(), "MATERIAL_ADDED", "New learning material",
+                r.title() + " was added to your class.", "/materials");
+        return material;
     }
 
     @Transactional
@@ -177,8 +182,13 @@ public class TeacherService {
         }
         if (r.batchId() != null)
             verifyBatchOwnership(user, r.batchId());
-        return announcementRepository.save(Announcement.builder().batchId(r.batchId()).createdBy(user.getId()).title(r.title())
+        Announcement announcement = announcementRepository.save(Announcement.builder().batchId(r.batchId()).createdBy(user.getId()).title(r.title())
                 .description(r.description()).type(r.type()).time(r.time()).build());
+        if (r.batchId() != null) {
+            notificationService.notifyBatchStudents(r.batchId(), "ANNOUNCEMENT_CREATED", "New class announcement",
+                    r.title(), "/classes/" + r.batchId() + "?tab=announcements");
+        }
+        return announcement;
     }
 
     @Transactional
@@ -353,7 +363,10 @@ public class TeacherService {
                 .accent("#2D9F75")
                 .build();
 
-        return scheduleRepository.save(item);
+        ScheduleItem saved = scheduleRepository.save(item);
+        notificationService.notifyBatchStudents(batch.getId(), "SCHEDULE_CREATED", "New class schedule",
+                item.getTitle() + " was added to your class schedule.", "/schedule");
+        return saved;
     }
 
     @Transactional
@@ -364,6 +377,7 @@ public class TeacherService {
         ScheduleItem schedule = scheduleRepository.findById(scheduleId)
                 .filter(s -> !s.isDeleted())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Schedule not found"));
+        UUID previousBatchId = schedule.getBatchId();
 
         // 2. IDOR Prevention: Verify current schedule belongs to current teacher
         verifyBatchOwnership(user, schedule.getBatchId());
@@ -424,6 +438,14 @@ public class TeacherService {
             }
         }
 
+        boolean changed = !Objects.equals(previousBatchId, targetBatch.getId())
+                || !Objects.equals(schedule.getTitle(), r.title().trim())
+                || !Objects.equals(schedule.getEffectiveDate(), baseDate)
+                || !Objects.equals(schedule.getStartTime(), parsedStartTime)
+                || !Objects.equals(schedule.getEndTime(), parsedEndTime)
+                || !Objects.equals(schedule.getLocation(), r.location() != null ? r.location().trim() : "TBD")
+                || schedule.getMode() != mode || schedule.getRecurrence() != recurrence;
+
         // 7. Mutate Entity Fields
         schedule.setBatchId(targetBatch.getId());
         schedule.setTitle(r.title().trim());
@@ -438,7 +460,16 @@ public class TeacherService {
         schedule.setMode(mode);
         schedule.setRecurrence(recurrence);
 
-        return scheduleRepository.save(schedule);
+        ScheduleItem saved = scheduleRepository.save(schedule);
+        if (changed) {
+            if (!Objects.equals(previousBatchId, targetBatch.getId())) {
+                notificationService.notifyBatchStudents(previousBatchId, "SCHEDULE_CANCELLED", "Class schedule cancelled",
+                        "A class session was removed from your schedule. Check the updated class timetable.", "/schedule");
+            }
+            notificationService.notifyBatchStudents(targetBatch.getId(), "SCHEDULE_UPDATED", "Class schedule updated",
+                    schedule.getTitle() + " has changed. Check your class schedule for the latest details.", "/schedule");
+        }
+        return saved;
     }
 
     @Transactional
@@ -453,6 +484,8 @@ public class TeacherService {
         // Soft delete: keep historical records intact
         schedule.setDeleted(true);
         scheduleRepository.save(schedule);
+        notificationService.notifyBatchStudents(schedule.getBatchId(), "SCHEDULE_CANCELLED", "Class schedule cancelled",
+                schedule.getTitle() + " was removed from your class schedule.", "/schedule");
     }
 
 }

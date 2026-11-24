@@ -44,6 +44,7 @@ public class BatchService {
 
     @Transactional
     public Batch createBatch(String teacherEmail, CreateBatchDto dto) {
+        validateDetails(dto);
         User user = userRepository.findByEmail(teacherEmail)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
@@ -56,12 +57,52 @@ public class BatchService {
         Batch batch = new Batch();
         batch.setName(dto.getName().trim());
         batch.setExamYear(dto.getExamYear().trim());
-        batch.setMonthlyFee(dto.getMonthlyFee());
+        // Billing is paused. Retain the legacy column/history, but new classes have no fee.
+        batch.setMonthlyFee(java.math.BigDecimal.ZERO);
         batch.setDeliveryMode(dto.getDeliveryMode());
         batch.setSubjectId(subject.getId());
         batch.setTeacherId(teacher.getId());
         batch.setActive(true);
 
+        return batchRepository.save(batch);
+    }
+
+    private void validateDetails(CreateBatchDto request) {
+        if (request.getName() == null || request.getName().isBlank() || request.getName().trim().length() > 255
+                || request.getExamYear() == null || !request.getExamYear().matches("[0-9]{4}")
+                || request.getSubjectId() == null || !Set.of("ONLINE", "IN_PERSON", "HYBRID").contains(request.getDeliveryMode() == null ? "" : request.getDeliveryMode())) {
+            throw new IllegalArgumentException("Provide a class name, four-digit exam year, subject and valid delivery mode.");
+        }
+    }
+
+    private Batch ownedBatch(String email, UUID id) {
+        User user = userRepository.findByEmail(email)
+                .filter(account -> account.isEnabled() && "TEACHER".equals(account.getUserType()))
+                .orElseThrow(() -> new org.springframework.security.access.AccessDeniedException("Active teacher account required."));
+        Teacher teacher = teacherRepository.findByUserId(user.getId())
+                .orElseThrow(() -> new org.springframework.security.access.AccessDeniedException("Teacher profile required."));
+        Batch batch = batchRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND, "Class not found."));
+        if (!teacher.getId().equals(batch.getTeacherId())) throw new org.springframework.security.access.AccessDeniedException("This class does not belong to you.");
+        return batch;
+    }
+
+    @Transactional
+    public Batch updateBatch(String email, UUID id, CreateBatchDto request) {
+        Batch batch = ownedBatch(email, id);
+        validateDetails(request);
+        Subject subject = subjectRepository.findById(request.getSubjectId()).filter(item -> !item.isDeleted() && item.isActive())
+                .orElseThrow(() -> new IllegalArgumentException("Select an available subject."));
+        batch.setName(request.getName().trim()); batch.setExamYear(request.getExamYear());
+        batch.setDeliveryMode(request.getDeliveryMode()); batch.setSubjectId(subject.getId());
+        return batchRepository.save(batch);
+    }
+
+    @Transactional
+    public Batch setActive(String email, UUID id, boolean active) {
+        Batch batch = ownedBatch(email, id);
+        batch.setActive(active);
+        // Enrollment rows, payment history, files, submissions and results remain intact.
         return batchRepository.save(batch);
     }
 
@@ -132,7 +173,9 @@ public class BatchService {
                 status = "APPROVED";
             } else if (requestMap.containsKey(batch.getId())) {
                 EnrollmentRequest req = requestMap.get(batch.getId());
-                status = req.getStatus() != null ? req.getStatus().name() : "PENDING";
+                // A request is decision history; only an active enrollment grants access.
+                status = req.getStatus() == lk.tutionlms.backend.enrollment.EnrollmentStatus.APPROVED
+                        ? "REJECTED" : req.getStatus() != null ? req.getStatus().name() : "PENDING";
                 requestId = req.getId();
             }
 
@@ -176,7 +219,8 @@ public class BatchService {
                         var reqOpt = enrollmentRequestRepository
                                 .findTopByStudentIdAndBatchIdAndIsDeletedFalseOrderByCreatedAtDesc(studentId, batch.getId());
                         if (reqOpt.isPresent()) {
-                            status = reqOpt.get().getStatus().name();
+                            status = reqOpt.get().getStatus() == lk.tutionlms.backend.enrollment.EnrollmentStatus.APPROVED
+                                    ? "REJECTED" : reqOpt.get().getStatus().name();
                             requestId = reqOpt.get().getId();
                         }
                     }

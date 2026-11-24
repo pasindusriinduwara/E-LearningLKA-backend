@@ -4,6 +4,7 @@ import lk.tutionlms.backend.assessment.dto.QuizDto;
 import lk.tutionlms.backend.batch.*;
 import lk.tutionlms.backend.enrollment.EnrollmentRepository;
 import lk.tutionlms.backend.identity.*;
+import lk.tutionlms.backend.notification.NotificationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.access.AccessDeniedException;
@@ -23,8 +24,9 @@ class ResultPublicationTests {
     final TeacherRepository teachers = mock(TeacherRepository.class);
     final EnrollmentRepository enrollments = mock(EnrollmentRepository.class);
     final QuizAttemptRepository attempts = mock(QuizAttemptRepository.class);
+    final NotificationService notifications = mock(NotificationService.class);
     final AssessmentService service = new AssessmentService(assessments, mock(QuestionRepository.class), batches,
-            submissions, students, enrollments, teachers, mock(AssessmentFileRepository.class), null, attempts);
+            submissions, students, enrollments, teachers, mock(AssessmentFileRepository.class), null, attempts, notifications);
     final User teacherUser = user("TEACHER"), studentUser = user("STUDENT");
     final Teacher teacher = new Teacher();
     final Student student = new Student();
@@ -36,7 +38,7 @@ class ResultPublicationTests {
 
     @BeforeEach
     void setup() {
-        teacher.setId(UUID.randomUUID()); student.setId(UUID.randomUUID());
+        teacher.setId(UUID.randomUUID()); student.setId(UUID.randomUUID()); student.setUserId(studentUser.getId());
         student.setName("Student One"); student.setStudentId("ST-001");
         batch.setId(UUID.randomUUID()); batch.setTeacherId(teacher.getId()); batch.setName("Batch A");
         assessment.setId(UUID.randomUUID()); assessment.setBatchId(batch.getId());
@@ -83,6 +85,9 @@ class ResultPublicationTests {
         assertEquals(1, result.assessment().publishedCount());
         var date = graded.getResultPublishedAt();
         service.publishResults(assessment.getId(), teacherUser); assertEquals(date, graded.getResultPublishedAt());
+        verify(notifications, times(1)).notifyUser(eq(studentUser.getId()), eq("RESULT_PUBLISHED"),
+                eq("Assessment result published"), eq("Your result for Term test is now available."), eq("/assessments"));
+        verifyNoMoreInteractions(notifications);
         assertEquals(new BigDecimal("80"), studentView(graded).getScoreObtained());
         assertEquals("Teacher feedback", studentView(graded).getFeedback());
     }
@@ -139,6 +144,25 @@ class ResultPublicationTests {
         assertThrows(AccessDeniedException.class, () -> service.unpublishResults(assessment.getId(), teacherUser));
         assertThrows(AccessDeniedException.class, () -> service.publishResults(assessment.getId(), studentUser));
         verify(submissions, never()).saveAllAndFlush(any());
+        verifyNoInteractions(notifications);
+    }
+
+    @Test void publishingHiddenAssessmentDoesNotNotifyStudentsAboutPrivateContent() {
+        assessment.setHidden(true);
+        submission("GRADED", "80");
+        service.publishResults(assessment.getId(), teacherUser);
+        verifyNoInteractions(notifications);
+    }
+
+    @Test void publishingDoesNotNotifyStudentsWhoNoLongerHaveAccessToTheBatch() {
+        Submission graded = submission("GRADED", "80");
+        when(enrollments.isStudentActiveInBatch(student.getId(), batch.getId())).thenReturn(false);
+
+        service.publishResults(assessment.getId(), teacherUser);
+
+        assertTrue(graded.isResultPublished());
+        assertThrows(AccessDeniedException.class, () -> studentView(graded));
+        verifyNoInteractions(notifications);
     }
 
     @Test void ranksShareTiesAndExcludeUngradedStudents() {

@@ -49,6 +49,7 @@ public class SecurityConfig {
                 .authenticationProvider(authenticationProvider)
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/error").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/actuator/health", "/actuator/health/**").permitAll()
                         .requestMatchers("/auth/**").permitAll()
                         .requestMatchers("/api/v1/auth/**").permitAll()
 
@@ -56,6 +57,8 @@ public class SecurityConfig {
 
                         .requestMatchers(HttpMethod.GET, "/api/v1/batches/**").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/batches").hasRole("TEACHER")
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/batches/**").hasRole("TEACHER")
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/batches/**").hasRole("TEACHER")
 
                         .requestMatchers("/api/v1/teacher/**").hasRole("TEACHER")
                         .requestMatchers("/api/v1/results/**").hasRole("TEACHER")
@@ -64,6 +67,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/subjects").hasRole("TEACHER")
 
                         .requestMatchers("/api/v1/users/**").authenticated()
+                        .requestMatchers("/api/v1/notifications/**").hasAnyRole("STUDENT", "TEACHER")
                         .requestMatchers("/api/v1/students/**").hasRole("STUDENT")
 
                         .requestMatchers("/api/v1/enrollments/teacher/**").hasRole("TEACHER")
@@ -104,7 +108,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/schedules/**").hasRole("TEACHER")
                         .requestMatchers(HttpMethod.PUT, "/api/v1/schedules/**").hasRole("TEACHER")
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/schedules/**").hasRole("TEACHER")
-                        .requestMatchers(HttpMethod.GET, "/api/v1/schedules/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/schedules/**").hasAnyRole("STUDENT", "TEACHER")
                         .requestMatchers("/api/v1/schedules/**").authenticated()
 
                         .requestMatchers(HttpMethod.GET, "/api/v1/announcements/**").hasAnyRole("STUDENT", "TEACHER")

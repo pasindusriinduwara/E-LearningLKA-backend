@@ -10,6 +10,7 @@ import lk.tutionlms.backend.identity.Teacher;
 import lk.tutionlms.backend.identity.TeacherRepository;
 import lk.tutionlms.backend.identity.User;
 import lk.tutionlms.backend.identity.UserRepository;
+import lk.tutionlms.backend.notification.NotificationService;
 import lk.tutionlms.backend.scheduling.ScheduleRepository;
 import lk.tutionlms.backend.teacher.dto.CreateAnnouncementRequest;
 import org.junit.jupiter.api.Test;
@@ -28,7 +29,7 @@ class AnnouncementMutationAccessTests {
     private final BatchRepository batches = mock(BatchRepository.class);
     private final TeacherService service = new TeacherService(teachers, mock(UserRepository.class), batches,
             mock(EnrollmentRepository.class), mock(ScheduleRepository.class), mock(MaterialRepository.class),
-            announcements, mock(SubjectRepository.class));
+            announcements, mock(SubjectRepository.class), mock(NotificationService.class));
 
     @Test
     void creationRecordsTheAuthenticatedAuthor() {

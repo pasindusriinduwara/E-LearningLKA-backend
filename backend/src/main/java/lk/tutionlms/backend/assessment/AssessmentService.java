@@ -10,6 +10,7 @@ import lk.tutionlms.backend.identity.User;
 import lk.tutionlms.backend.enrollment.EnrollmentRepository;
 import lk.tutionlms.backend.identity.Teacher;
 import lk.tutionlms.backend.identity.TeacherRepository;
+import lk.tutionlms.backend.notification.NotificationService;
 import com.cloudinary.Cloudinary;
 import com.cloudinary.utils.ObjectUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,6 +40,7 @@ public class AssessmentService {
     private final Cloudinary cloudinary;
     private final AssessmentFileRepository assessmentFileRepository;
     private final QuizAttemptRepository quizAttemptRepository;
+    private final NotificationService notificationService;
 
     // Allows an automatic timeout submission to reach the server; it never restarts an attempt.
     private static final long QUIZ_SUBMISSION_TRANSPORT_GRACE_SECONDS = 15;
@@ -55,7 +57,8 @@ public class AssessmentService {
             TeacherRepository teacherRepository,
             AssessmentFileRepository assessmentFileRepository,
             @Autowired(required = false) Cloudinary cloudinary,
-            QuizAttemptRepository quizAttemptRepository) {
+            QuizAttemptRepository quizAttemptRepository,
+            NotificationService notificationService) {
         this.assessmentRepository = assessmentRepository;
         this.questionRepository = questionRepository;
         this.batchRepository = batchRepository;
@@ -66,6 +69,7 @@ public class AssessmentService {
         this.cloudinary = cloudinary;
         this.assessmentFileRepository = assessmentFileRepository;
         this.quizAttemptRepository = quizAttemptRepository;
+        this.notificationService = notificationService;
     }
 
     public void verifyTeacherAssessmentAccess(User currentUser, Assessment assessment) {
@@ -165,6 +169,7 @@ public class AssessmentService {
             savedAssessment = assessmentRepository.save(savedAssessment);
         }
 
+        notifyAssessmentAvailable(savedAssessment);
         return savedAssessment;
     }
 
@@ -536,6 +541,7 @@ public class AssessmentService {
         submission.setAnswers(submissionAnswers);
 
         Submission savedSubmission = submissionRepository.save(submission);
+        notifyFirstSubmission(assessment);
         return buildSubmissionResult(assessment, savedSubmission);
     }
 
@@ -777,6 +783,9 @@ public class AssessmentService {
         }
 
         submission = submissionRepository.save(submission);
+        if (existing.isEmpty()) {
+            notifyFirstSubmission(assessment);
+        }
 
         return QuizDto.QuizSubmissionResultResponse.builder()
                 .submissionId(submission.getId())
@@ -939,6 +948,13 @@ public class AssessmentService {
                 submission.setResultPublished(true);
                 submission.setResultPublishedAt(now);
                 submission.setResultPublishedBy(user.getId());
+                if (!assessment.isHidden()
+                        && enrollmentRepository.isStudentActiveInBatch(submission.getStudentId(), assessment.getBatchId())) {
+                    studentRepository.findById(submission.getStudentId()).filter(student -> !student.isDeleted())
+                            .ifPresent(student -> notificationService.notifyUser(student.getUserId(),
+                                    "RESULT_PUBLISHED", "Assessment result published",
+                                    "Your result for " + assessment.getTitle() + " is now available.", "/assessments"));
+                }
             }
         }
         submissionRepository.saveAllAndFlush(graded);
@@ -1024,19 +1040,29 @@ public class AssessmentService {
             throw new AccessDeniedException("File access denied.");
         }
         Optional<AssessmentFile> stored = assessmentFileRepository.findByFilenameAndDeletedFalse(filename);
-        if (stored.isPresent() && stored.get().getUploadedBy().equals(currentUser.getId())) return;
-        if (stored.isPresent() && stored.get().isAnswerSheet() && stored.get().getAssessmentId() != null) {
-            verifyTeacherAssessmentAccess(currentUser, getAssessmentById(stored.get().getAssessmentId()));
-            return;
+        if (stored.isPresent()) {
+            AssessmentFile file = stored.get();
+            if (file.isAnswerSheet()) {
+                if (file.getAssessmentId() == null) throw new AccessDeniedException("File access denied.");
+                Assessment assessment = getAssessmentById(file.getAssessmentId());
+                if (file.getUploadedBy().equals(currentUser.getId()) && canReadAssessmentFile(assessment, currentUser)) return;
+                verifyTeacherAssessmentAccess(currentUser, assessment);
+                return;
+            }
+            // Teachers can preview their own unassigned question papers. Student answers
+            // always require current class access, including the original uploader.
+            if (file.getUploadedBy().equals(currentUser.getId()) && "TEACHER".equalsIgnoreCase(currentUser.getUserType())) return;
         }
         String url = "/api/v1/assessments/files/" + filename;
         for (Assessment assessment : assessmentRepository.findByAttachmentUrlAndDeletedFalse(url)) {
             if (canReadAssessmentFile(assessment, currentUser)) return;
         }
         for (Submission submission : submissionRepository.findByPaperUploadUrlAndDeletedFalse(url)) {
+            Assessment assessment = getAssessmentById(submission.getAssessmentId());
             if (studentRepository.findByUserId(currentUser.getId())
-                    .map(s -> s.getId().equals(submission.getStudentId())).orElse(false)) return;
-            if (isAssessmentTeacher(getAssessmentById(submission.getAssessmentId()), currentUser)) return;
+                    .map(s -> s.getId().equals(submission.getStudentId())).orElse(false)
+                    && canReadAssessmentFile(assessment, currentUser)) return;
+            if (isAssessmentTeacher(assessment, currentUser)) return;
         }
         throw new AccessDeniedException("File access denied.");
     }
@@ -1201,13 +1227,14 @@ public class AssessmentService {
 
     @Transactional
     public Assessment toggleHideAssessment(UUID id, User currentUser) {
-        Assessment a = assessmentRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Assessment not found with id: " + id));
+        Assessment a = lockAssessment(id);
         if (currentUser != null) {
             verifyTeacherAssessmentAccess(currentUser, a);
         }
         a.setHidden(!a.isHidden());
-        return assessmentRepository.save(a);
+        Assessment saved = assessmentRepository.save(a);
+        if (!saved.isHidden()) notifyAssessmentAvailable(saved);
+        return saved;
     }
 
     @Transactional
@@ -1218,6 +1245,7 @@ public class AssessmentService {
     @Transactional
     public Assessment updateAssessment(UUID id, QuizDto.UpdateAssessmentRequest request, User currentUser) {
         Assessment a = lockAssessment(id);
+        boolean previouslyHidden = a.isHidden();
 
         if (currentUser != null) {
             verifyTeacherAssessmentAccess(currentUser, a);
@@ -1249,7 +1277,22 @@ public class AssessmentService {
             a.setHidden(request.getHidden());
         }
 
-        return assessmentRepository.save(a);
+        Assessment saved = assessmentRepository.save(a);
+        if (previouslyHidden && !saved.isHidden()) notifyAssessmentAvailable(saved);
+        return saved;
+    }
+
+    private void notifyAssessmentAvailable(Assessment assessment) {
+        if (!assessment.isHidden() && !assessment.isDeleted()) {
+            notificationService.notifyBatchStudents(assessment.getBatchId(), "ASSESSMENT_AVAILABLE",
+                    "New assessment available", assessment.getTitle() + " is available in your class.", "/assessments");
+        }
+    }
+
+    private void notifyFirstSubmission(Assessment assessment) {
+        notificationService.notifyBatchTeacher(assessment.getBatchId(), "ASSESSMENT_SUBMITTED",
+                "New assessment submission", "A student submitted " + assessment.getTitle() + ".",
+                "/teacher/results");
     }
 
     @Transactional

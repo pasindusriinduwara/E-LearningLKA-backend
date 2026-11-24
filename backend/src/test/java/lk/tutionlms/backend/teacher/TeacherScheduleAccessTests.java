@@ -6,6 +6,7 @@ import lk.tutionlms.backend.communication.AnnouncementRepository;
 import lk.tutionlms.backend.content.MaterialRepository;
 import lk.tutionlms.backend.enrollment.EnrollmentRepository;
 import lk.tutionlms.backend.identity.*;
+import lk.tutionlms.backend.notification.NotificationService;
 import lk.tutionlms.backend.scheduling.ScheduleItem;
 import lk.tutionlms.backend.scheduling.ScheduleRepository;
 import lk.tutionlms.backend.teacher.dto.UpdateScheduleRequest;
@@ -41,7 +42,8 @@ class TeacherScheduleAccessTests {
 
     @BeforeEach
     void setup() {
-        service = new TeacherService(teachers, users, batches, enrollments, schedules, materials, announcements, subjects);
+        service = new TeacherService(teachers, users, batches, enrollments, schedules, materials, announcements, subjects,
+                mock(NotificationService.class));
         user = new User();
         user.setId(UUID.randomUUID());
         teacher = new Teacher();

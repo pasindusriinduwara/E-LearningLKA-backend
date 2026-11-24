@@ -5,10 +5,12 @@ import com.cloudinary.utils.ObjectUtils;
 import lk.tutionlms.backend.content.LearningMaterial;
 import lk.tutionlms.backend.content.MaterialRepository;
 import lk.tutionlms.backend.identity.User;
+import lk.tutionlms.backend.notification.NotificationService;
 import lk.tutionlms.backend.teacher.dto.MaterialUploadResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -36,7 +38,9 @@ public class MaterialUploadService {
     private final Cloudinary cloudinary;
     private final MaterialRepository materialRepository;
     private final TeacherService teacherService;
+    private final NotificationService notificationService;
 
+    @Transactional
     public MaterialUploadResponse upload(
             User user,
             UUID batchId,
@@ -103,6 +107,8 @@ public class MaterialUploadService {
                             .fileUrl(url)
                             .cloudinaryPublicId(publicId)
                             .build());
+            notificationService.notifyBatchStudents(batchId, "MATERIAL_ADDED", "New learning material",
+                    material.getTitle() + " was added to your class.", "/materials");
 
             return new MaterialUploadResponse(
                     material.getId(), material.getBatchId(), material.getTitle(),

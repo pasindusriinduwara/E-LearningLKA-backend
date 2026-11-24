@@ -6,6 +6,7 @@ import lk.tutionlms.backend.batch.Batch;
 import lk.tutionlms.backend.batch.BatchRepository;
 import lk.tutionlms.backend.enrollment.EnrollmentRepository;
 import lk.tutionlms.backend.identity.*;
+import lk.tutionlms.backend.notification.NotificationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
@@ -28,7 +29,8 @@ class AssessmentAccessTests {
     private final AssessmentFileRepository files = mock(AssessmentFileRepository.class);
     private final Cloudinary cloudinary = mock(Cloudinary.class);
     private final AssessmentService service = new AssessmentService(assessments, mock(QuestionRepository.class),
-            batches, submissions, students, enrollments, teachers, files, cloudinary, mock(QuizAttemptRepository.class));
+            batches, submissions, students, enrollments, teachers, files, cloudinary, mock(QuizAttemptRepository.class),
+            mock(NotificationService.class));
     private final User studentUser = user("STUDENT");
     private final User teacherUser = user("TEACHER");
     private final Student student = new Student();
@@ -258,6 +260,27 @@ class AssessmentAccessTests {
         file.setAnswerSheet(true); file.setAssessmentId(assessment.getId());
         when(files.findByFilenameAndDeletedFalse("answer.pdf")).thenReturn(Optional.of(file));
         assertThrows(AccessDeniedException.class, () -> service.verifyFileAccess("answer.pdf", studentUser));
+    }
+
+    @Test
+    void originalAnswerUploaderMustRetainCurrentClassAccess() {
+        enrollStudent();
+        AssessmentFile file = new AssessmentFile(); file.setUploadedBy(studentUser.getId());
+        file.setAnswerSheet(true); file.setAssessmentId(assessment.getId());
+        when(files.findByFilenameAndDeletedFalse("answer.pdf")).thenReturn(Optional.of(file));
+        assertDoesNotThrow(() -> service.verifyFileAccess("answer.pdf", studentUser));
+        when(enrollments.isStudentActiveInBatch(student.getId(),batchId)).thenReturn(false);
+        assertThrows(AccessDeniedException.class, () -> service.verifyFileAccess("answer.pdf", studentUser));
+    }
+
+    @Test
+    void legacyLinkedAnswersAlsoRequireCurrentClassAccess() {
+        enrollStudent();
+        Submission submission = Submission.builder().assessmentId(assessment.getId()).studentId(student.getId()).build();
+        when(submissions.findByPaperUploadUrlAndDeletedFalse("/api/v1/assessments/files/legacy.pdf")).thenReturn(List.of(submission));
+        assertDoesNotThrow(() -> service.verifyFileAccess("legacy.pdf", studentUser));
+        when(enrollments.isStudentActiveInBatch(student.getId(),batchId)).thenReturn(false);
+        assertThrows(AccessDeniedException.class, () -> service.verifyFileAccess("legacy.pdf", studentUser));
     }
 
     @Test
